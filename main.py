@@ -8,12 +8,15 @@
 import pygame
 import sys
 import math
+from pygame.locals import *
+from formations import get_presets
+
 
 # Initialize Pygame
 pygame.init()
 
 # Screen dimensions and setup
-WIDTH, HEIGHT = 1000, 500
+WIDTH, HEIGHT = 1180, 580 # true dimensions are 120x53.3 scaled up to 1080x480, plus 50 px on each side
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("American Football Formation")
 
@@ -30,33 +33,18 @@ YELLOW = (255, 255, 0)
 CIRCLE_RADIUS = 10  # Scaled-down size for players
 VECTOR_LENGTH = 50  # Default length of velocity vectors
 
+current_formation = {"Offense": "Singleback", "Defense": "3-4"}
+
 # Formations
 def get_red_offense():
     """Returns positions for the offense in an I-formation."""
-    positions = [
-        # O - Line
-        {"pos": [2 * WIDTH // 4 - 20, HEIGHT // 2 - 50],  "label": "LT"},
-        {"pos": [2 * WIDTH // 4 - 20, HEIGHT // 2 - 25],  "label": "LG"},
-        {"pos": [2 * WIDTH // 4 - 20, HEIGHT // 2], "label": "C"},
-        {"pos": [2 * WIDTH // 4 - 20, HEIGHT // 2 + 25], "label": "RG"},
-        {"pos": [2 * WIDTH // 4 - 20, HEIGHT // 2 + 50],  "label": "RT"},
-
-        # Backfield
-        {"pos": [2 * WIDTH // 4 - 50, HEIGHT // 2], "label": "QB"},
-        {"pos": [2 * WIDTH // 4 - 80, HEIGHT // 2], "label": "FB"},
-        {"pos": [2 * WIDTH // 4 - 110, HEIGHT // 2],"label": "HB"},
-
-        # Receivers
-        {"pos": [2 * WIDTH // 4 - 20, HEIGHT // 2 - 110], "label": "WR1"},
-        {"pos": [2 * WIDTH // 4 - 20, HEIGHT // 2 + 135], "label": "WR2"},
-        {"pos": [2 * WIDTH // 4 - 20, HEIGHT // 2 + 75], "label": "TE"},
-    ]
-    
+    positions = get_presets(HEIGHT, WIDTH)["Offense"][current_formation["Offense"]]
     return [{"pos": pos["pos"], "label": pos["label"], "color": RED, "dragging": False, "vector": [0, 0]} for pos in positions]
 
 def get_blue_defense():
     """Returns positions for the defense in a 2-high man shell."""
-    positions = [
+    positions = get_presets(HEIGHT, WIDTH)["Defense"][current_formation["Defense"]]
+    [
         # Linebackers
         {"pos": [2 * WIDTH // 4 + 60, HEIGHT // 2], "label": "MLB", },
         {"pos": [2 * WIDTH // 4 + 60, HEIGHT // 2 - 40],"label": "ROLB",},
@@ -84,11 +72,19 @@ circles = get_red_offense() + get_blue_defense()
 def draw_field():
     screen.fill(GREEN)
     pygame.draw.rect(screen, WHITE, (50, 50, WIDTH - 100, HEIGHT - 100), 5)
+
+    # Yardage Lines
     for i in range(1, 10):
-        x = 50 + i * (WIDTH - 100) // 10
+        x = 140 + i * (WIDTH - 280) // 10
         pygame.draw.line(screen, WHITE, (x, 50), (x, HEIGHT - 50), 2)
-    pygame.draw.rect(screen, WHITE, (50, 50, 50, HEIGHT - 100), 5)
-    pygame.draw.rect(screen, WHITE, (WIDTH - 100, 50, 50, HEIGHT - 100), 5)
+
+    # Left and Right TD
+    pygame.draw.rect(screen, RED, (50, 50, 90, HEIGHT - 100))
+    pygame.draw.rect(screen, WHITE, (50, 50, 90, HEIGHT - 100), 5)
+    pygame.draw.rect(screen, BLUE, (WIDTH - 140, 50, 90, HEIGHT - 100))
+    pygame.draw.rect(screen, WHITE, (WIDTH - 140, 50, 90, HEIGHT - 100), 5)
+
+    # 50 yd line
     pygame.draw.line(screen, WHITE, (WIDTH // 2, 50), (WIDTH // 2, HEIGHT - 50), 5)
 
 # Draw toggle button
@@ -110,6 +106,27 @@ def draw_play_button():
     pygame.draw.circle(screen, YELLOW, (WIDTH - 70, 30), 20)
     pygame.draw.polygon(screen, BLACK, [(WIDTH - 80, 20), (WIDTH - 60, 30), (WIDTH - 80, 40)])
 
+field_orientation = "horizontal"  # Default to horizontal
+
+def flip_orientation():
+    global field_orientation
+    field_orientation = "vertical" if field_orientation == "horizontal" else "horizontal"
+
+
+def draw_dropdown_menu():
+    # Render dropdown menu for formations
+    font = pygame.font.Font(None, 30)
+    y_offset = 10
+    for team, formations in get_presets(HEIGHT, WIDTH).items():
+        text_surface = font.render(f"{team}: {current_formation[team]}", True, BLACK)
+        screen.blit(text_surface, (10, y_offset))
+        y_offset += 30
+
+def set_formation(team, formation):
+    global current_formation, circles
+    current_formation[team] = formation
+    circles = get_red_offense() + get_blue_defense()
+    # positions = get_presets(HEIGHT, WIDTH)[team][formation]
 
 # Update player positions
 def update_positions(elapsed_time):
@@ -153,6 +170,9 @@ while running:
         if event.type == pygame.QUIT:
             running = False
         elif event.type == pygame.MOUSEBUTTONDOWN:
+
+            # print(circles)
+            
             # Toggle mode button
             if WIDTH // 2 - 50 <= event.pos[0] <= WIDTH // 2 + 50 and 10 <= event.pos[1] <= 50:
                 mode = "Vector" if mode == "Position" else "Position"
@@ -175,13 +195,27 @@ while running:
                 if circle["dragging"]:
                     if mode == "Position":
                         new_x, new_y = event.pos
-                        if circle["color"] == RED and new_x < WIDTH // 2:
-                            circle["pos"] = [new_x, new_y]
-                        elif circle["color"] == BLUE and new_x > WIDTH // 2:
-                            circle["pos"] = [new_x, new_y]
+                        # Boundaries
+                        if 50 < new_x < WIDTH - 50 and 50 < new_y < HEIGHT - 50:
+                            # LOS Bounds
+                            if circle["color"] == RED and new_x < WIDTH // 2:
+                                circle["pos"] = [new_x, new_y]
+                            elif circle["color"] == BLUE and new_x > WIDTH // 2:
+                                circle["pos"] = [new_x, new_y]
                     elif mode == "Vector":
                         start_pos = circle["pos"]
                         circle["vector"] = [event.pos[0] - start_pos[0], event.pos[1] - start_pos[1]]
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_1:  
+                set_formation("Offense", "I-Form")
+            elif event.key == pygame.K_2:  
+                set_formation("Offense", "Singleback")
+            elif event.key == pygame.K_3:  
+                set_formation("Offense", "Shotgun")
+            elif event.key == pygame.K_8:
+                set_formation("Defense", "4-3")
+            elif event.key == pygame.K_9:
+                set_formation("Defense", "3-4")
 
     draw_field()
     draw_toggle()
@@ -191,7 +225,6 @@ while running:
     font = pygame.font.Font(None, 24)
     text = font.render(f"{active_position}: {cursor_pos}", True, BLACK)
     screen.blit(text, (10, 10))
-
 
     # Draw players
     font = pygame.font.Font(None, 24)
