@@ -10,7 +10,9 @@ import sys
 import math
 from pygame.locals import *
 from formations import get_presets
-
+import torch
+from model import model, prepare_tensor
+import pandas as pd
 
 # Initialize Pygame
 pygame.init()
@@ -33,7 +35,13 @@ YELLOW = (255, 255, 0)
 CIRCLE_RADIUS = 10  # Scaled-down size for players
 VECTOR_LENGTH = 50  # Default length of velocity vectors
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 current_formation = {"Offense": "Singleback", "Defense": "3-4"}
+
+model.load_state_dict(torch.load('./best_model_week3.pth', weights_only=True, map_location=DEVICE))
+model.eval()
 
 # Formations
 def get_red_offense():
@@ -67,6 +75,68 @@ def get_blue_defense():
 
 # Combine all players
 circles = get_red_offense() + get_blue_defense()
+
+def create_player_dataframe(circles):
+  """
+  Creates a pandas DataFrame from the list of player positions and vectors.
+
+  Args:
+      circles: A list of dictionaries representing player positions and vectors.
+
+  Returns:
+      A pandas DataFrame with columns:
+          x_clean: Cleaned x-position (accounting for field boundaries).
+          y_clean: Cleaned y-position (accounting for field boundaries).
+          v_x: x-component of the velocity vector.
+          v_y: y-component of the velocity vector.
+          defense: 0 if offensive player, 1 if defensive player.
+  """
+  data = []
+  for circle in circles:
+    # Adjust positions based on team color and field boundaries
+    x_pos = circle["pos"][0]
+    y_pos = circle["pos"][1]
+    if circle["color"] == RED:
+      x_pos = max(x_pos, 50)  # Limit offense to their side of the field
+    else:
+      x_pos = min(x_pos, WIDTH - 50)  # Limit defense to their side of the field
+
+    data.append({
+        "frameId": 1,
+        "x_clean": x_pos,
+        "y_clean": min(max(y_pos, 50), HEIGHT - 50),  # Clamp y-position to field bounds
+        "v_x": circle["vector"][0],
+        "v_y": circle["vector"][1],
+        "defense": 1 if circle["color"] == BLUE else 0  # 1 for defense, 0 for offense
+    })
+
+  return pd.DataFrame(data)
+
+def predict_coverage(circles):
+  """
+  Prepares the positions data as a tensor and predicts zone/man coverage.
+
+  Args:
+      positions: A representation of the current player positions.
+
+  Returns:
+      zone_prob: Probability of zone coverage.
+      man_prob: Probability of man coverage.
+  """
+  # Prepare positions data as a tensor (replace with your specific logic)
+  positions = create_player_dataframe(circles)
+  frame_tensor = prepare_tensor(positions)
+
+  frame_tensor = frame_tensor.to(DEVICE)  # Move to device if necessary
+
+  with torch.no_grad():
+      outputs = model(frame_tensor)  # Shape: [num_frames, num_classes]
+      probabilities = torch.softmax(outputs, dim=1).cpu().numpy()
+
+      zone_prob = probabilities[0][0]
+      man_prob = probabilities[0][1]
+
+  return zone_prob, man_prob
 
 # Draw American football field
 def draw_field():
@@ -220,6 +290,12 @@ while running:
     draw_field()
     draw_toggle()
     draw_play_button()
+
+    # Get coverage prediction
+    zone, man = predict_coverage(circles)
+    font = pygame.font.Font(None, 24)
+    text = font.render(f"Zone: {zone:.2f}, Man: {man:.2f}", True, BLACK)
+    screen.blit(text, (WIDTH // 2 - 75, HEIGHT - 30))
 
     cursor_pos = pygame.mouse.get_pos()
     font = pygame.font.Font(None, 24)
