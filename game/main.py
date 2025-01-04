@@ -13,12 +13,14 @@ from formations import get_presets
 import torch
 from model import model, prepare_tensor
 import pandas as pd
+import asyncio
 
 # Initialize Pygame
 pygame.init()
 
 # Screen dimensions and setup
-WIDTH, HEIGHT = 1180, 580 # true dimensions are 120x53.3 scaled up to 1080x480, plus 50 px on each side
+WIDTH, HEIGHT = 1330, 580  # 150 px for dropdown menu
+FIELD_WIDTH = WIDTH - 150 # true dimensions are 120x53.3 scaled up to 1080x480, plus 50 px on each side
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("American Football Formation")
 
@@ -46,71 +48,78 @@ model.eval()
 # Formations
 def get_red_offense():
     """Returns positions for the offense in an I-formation."""
-    positions = get_presets(HEIGHT, WIDTH)["Offense"][current_formation["Offense"]]
+    positions = get_presets(HEIGHT, FIELD_WIDTH)["Offense"][current_formation["Offense"]]
     return [{"pos": pos["pos"], "label": pos["label"], "color": RED, "dragging": False, "vector": [0, 0]} for pos in positions]
 
 def get_blue_defense():
     """Returns positions for the defense in a 2-high man shell."""
-    positions = get_presets(HEIGHT, WIDTH)["Defense"][current_formation["Defense"]]
-    [
-        # Linebackers
-        {"pos": [2 * WIDTH // 4 + 60, HEIGHT // 2], "label": "MLB", },
-        {"pos": [2 * WIDTH // 4 + 60, HEIGHT // 2 - 40],"label": "ROLB",},
-        {"pos": [2 * WIDTH // 4 + 60, HEIGHT // 2 + 40],  "label": "LOLB",},
-
-        # Defensive Backs
-        {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 - 110],  "label": "CB1"},
-        {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 + 135], "label": "CB2",},
-        {"pos": [2 * WIDTH // 4 + 140, HEIGHT // 2 - 75],  "label": "FS",},
-        {"pos": [2 * WIDTH // 4 + 140, HEIGHT // 2 + 75],  "label": "SS",},
-
-        # D - Line
-        {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 - 38], "label": "DE1", },
-        {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 - 13],  "label": "DT1",},
-        {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 + 13],  "label": "DT2",},
-        {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 + 38], "label": "DE2", },
-    ]
-
+    positions = get_presets(HEIGHT, FIELD_WIDTH)["Defense"][current_formation["Defense"]]
     return [{"pos": pos["pos"], "label": pos["label"], "color": BLUE, "dragging": False, "vector": [0, 0]} for pos in positions]
 
 # Combine all players
 circles = get_red_offense() + get_blue_defense()
-
 def create_player_dataframe(circles):
-  """
-  Creates a pandas DataFrame from the list of player positions and vectors.
+    """
+    Creates a pandas DataFrame from the list of player positions and vectors.
 
-  Args:
-      circles: A list of dictionaries representing player positions and vectors.
+    Args:
+        circles: A list of dictionaries representing player positions and vectors.
 
-  Returns:
-      A pandas DataFrame with columns:
-          x_clean: Cleaned x-position (accounting for field boundaries).
-          y_clean: Cleaned y-position (accounting for field boundaries).
-          v_x: x-component of the velocity vector.
-          v_y: y-component of the velocity vector.
-          defense: 0 if offensive player, 1 if defensive player.
-  """
-  data = []
-  for circle in circles:
-    # Adjust positions based on team color and field boundaries
-    x_pos = circle["pos"][0]
-    y_pos = circle["pos"][1]
-    if circle["color"] == RED:
-      x_pos = max(x_pos, 50)  # Limit offense to their side of the field
-    else:
-      x_pos = min(x_pos, WIDTH - 50)  # Limit defense to their side of the field
+    Returns:
+        A pandas DataFrame with columns:
+            x_clean: Cleaned x-position (accounting for field boundaries).
+            y_clean: Cleaned y-position (accounting for field boundaries).
+            v_x: x-component of the velocity vector.
+            v_y: y-component of the velocity vector.
+            defense: 0 if offensive player, 1 if defensive player.
+    """
+    data = []
+    for circle in circles:
+        # Adjust positions based on team color and field boundaries
+        x_pos = circle["pos"][0]
+        y_pos = circle["pos"][1]
+        # if circle["color"] == RED:
+        #   x_pos = max(x_pos, 50)  # Limit offense to their side of the field
+        # else:
+        #   x_pos = min(x_pos, WIDTH - 50)  # Limit defense to their side of the field
 
-    data.append({
-        "frameId": 1,
-        "x_clean": x_pos,
-        "y_clean": min(max(y_pos, 50), HEIGHT - 50),  # Clamp y-position to field bounds
-        "v_x": circle["vector"][0],
-        "v_y": circle["vector"][1],
-        "defense": 1 if circle["color"] == BLUE else 0  # 1 for defense, 0 for offense
-    })
+        data.append({
+            "frameId": 1,
+            "x_clean": (x_pos - 50) / 9,
+            "y_clean": (y_pos - 50) / 9,# min(max(y_pos, 50), HEIGHT - 50),  # Clamp y-position to field bounds
+            "v_x": circle["vector"][0] / 9,
+            "v_y": circle["vector"][1] / 9,
+            "defense": 1 if circle["color"] == BLUE else 0  # 1 for defense, 0 for offense
+        })
 
-  return pd.DataFrame(data)
+    print(pd.DataFrame(data))   
+    return pd.DataFrame(data)
+
+def draw_play_dropdown():
+    font = pygame.font.Font(None, 24)
+    y_offset = 70  # Start dropdown below toggle
+    for i, formation in enumerate(["3-4", "4-3", "Nickel"]):
+        rect = pygame.Rect(1180, y_offset, 100, 25)
+        pygame.draw.rect(screen, GREY if current_formation["Defense"] != formation else YELLOW, rect)
+        text = font.render(formation, True, BLACK)
+        screen.blit(text, (1205, y_offset + 5))
+        y_offset += 30
+    y_offset += 75
+    for i, formation in enumerate(["I-Form", "Singleback", "Shotgun"]):
+        rect = pygame.Rect(1180, y_offset, 100, 25)
+        pygame.draw.rect(screen, GREY if current_formation["Offense"] != formation else YELLOW, rect)
+        text = font.render(formation, True, BLACK)
+        screen.blit(text, (1205, y_offset + 5))
+        y_offset += 30
+
+def handle_dropdown_click(pos):
+    y_offset = 70
+    for i, formation in enumerate(["3-4", "4-3", "Nickel", "Dime"]):
+        if 10 <= pos[0] <= 110 and y_offset <= pos[1] <= y_offset + 25:
+            set_formation("Defense", formation)
+            break
+        y_offset += 30
+
 
 def predict_coverage(circles):
   """
@@ -141,21 +150,21 @@ def predict_coverage(circles):
 # Draw American football field
 def draw_field():
     screen.fill(GREEN)
-    pygame.draw.rect(screen, WHITE, (50, 50, WIDTH - 100, HEIGHT - 100), 5)
+    pygame.draw.rect(screen, WHITE, (50, 50, FIELD_WIDTH - 100, HEIGHT - 100), 5)
 
     # Yardage Lines
     for i in range(1, 10):
-        x = 140 + i * (WIDTH - 280) // 10
+        x = 140 + i * (FIELD_WIDTH - 280) // 10
         pygame.draw.line(screen, WHITE, (x, 50), (x, HEIGHT - 50), 2)
 
     # Left and Right TD
     pygame.draw.rect(screen, RED, (50, 50, 90, HEIGHT - 100))
     pygame.draw.rect(screen, WHITE, (50, 50, 90, HEIGHT - 100), 5)
-    pygame.draw.rect(screen, BLUE, (WIDTH - 140, 50, 90, HEIGHT - 100))
-    pygame.draw.rect(screen, WHITE, (WIDTH - 140, 50, 90, HEIGHT - 100), 5)
+    pygame.draw.rect(screen, BLUE, (FIELD_WIDTH - 140, 50, 90, HEIGHT - 100))
+    pygame.draw.rect(screen, WHITE, (FIELD_WIDTH - 140, 50, 90, HEIGHT - 100), 5)
 
     # 50 yd line
-    pygame.draw.line(screen, WHITE, (WIDTH // 2, 50), (WIDTH // 2, HEIGHT - 50), 5)
+    pygame.draw.line(screen, WHITE, (FIELD_WIDTH // 2, 50), (FIELD_WIDTH // 2, HEIGHT - 50), 5)
 
 # Draw toggle button
 def draw_toggle():
@@ -183,14 +192,14 @@ def flip_orientation():
     field_orientation = "vertical" if field_orientation == "horizontal" else "horizontal"
 
 
-def draw_dropdown_menu():
-    # Render dropdown menu for formations
-    font = pygame.font.Font(None, 30)
-    y_offset = 10
-    for team, formations in get_presets(HEIGHT, WIDTH).items():
-        text_surface = font.render(f"{team}: {current_formation[team]}", True, BLACK)
-        screen.blit(text_surface, (10, y_offset))
-        y_offset += 30
+# def draw_dropdown_menu():
+#     # Render dropdown menu for formations
+#     font = pygame.font.Font(None, 30)
+#     y_offset = 10
+#     for team, formations in get_presets(HEIGHT, WIDTH).items():
+#         text_surface = font.render(f"{team}: {current_formation[team]}", True, BLACK)
+#         screen.blit(text_surface, (10, y_offset))
+#         y_offset += 30
 
 def set_formation(team, formation):
     global current_formation, circles
@@ -220,6 +229,8 @@ mode = "Position"  # Default mode
 playing = False
 start_time = None
 
+# async def main():
+
 # Main loop
 running = True
 clock = pygame.time.Clock()
@@ -242,9 +253,10 @@ while running:
         elif event.type == pygame.MOUSEBUTTONDOWN:
 
             # print(circles)
-            
+            if 10 <= event.pos[0] <= 110:
+                handle_dropdown_click(event.pos)
             # Toggle mode button
-            if WIDTH // 2 - 50 <= event.pos[0] <= WIDTH // 2 + 50 and 10 <= event.pos[1] <= 50:
+            elif WIDTH // 2 - 50 <= event.pos[0] <= WIDTH // 2 + 50 and 10 <= event.pos[1] <= 50:
                 mode = "Vector" if mode == "Position" else "Position"
             # Play button
             elif (event.pos[0] - (WIDTH - 70)) ** 2 + (event.pos[1] - 30) ** 2 <= 20 ** 2:
@@ -267,11 +279,11 @@ while running:
                         new_x, new_y = event.pos
                         # Boundaries
                         if 50 < new_x < WIDTH - 50 and 50 < new_y < HEIGHT - 50:
+                            circle["pos"] = [new_x, new_y]
                             # LOS Bounds
-                            if circle["color"] == RED and new_x < WIDTH // 2:
-                                circle["pos"] = [new_x, new_y]
-                            elif circle["color"] == BLUE and new_x > WIDTH // 2:
-                                circle["pos"] = [new_x, new_y]
+                            # if circle["color"] == RED: # and new_x < WIDTH // 2:
+                            # elif circle["color"] == BLUE: # and new_x > WIDTH // 2:
+                            #     circle["pos"] = [new_x, new_y]
                     elif mode == "Vector":
                         start_pos = circle["pos"]
                         circle["vector"] = [event.pos[0] - start_pos[0], event.pos[1] - start_pos[1]]
@@ -290,6 +302,7 @@ while running:
     draw_field()
     draw_toggle()
     draw_play_button()
+    draw_play_dropdown()
 
     # Get coverage prediction
     zone, man = predict_coverage(circles)
@@ -319,3 +332,6 @@ while running:
 
 pygame.quit()
 sys.exit()
+    # await asyncio.sleep(0)
+
+# asyncio.run(main())

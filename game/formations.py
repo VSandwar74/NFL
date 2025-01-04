@@ -94,5 +94,21 @@ def get_presets(HEIGHT, WIDTH):
             {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 + 13],  "label": "DT2",},
             {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 + 38], "label": "DE2", },
         ], 
-        "Nickel": [],  # Define Nickel positions here
+        "Nickel": [            # Linebackers
+            {"pos": [2 * WIDTH // 4 + 60, HEIGHT // 2 - 40],"label": "ROLB",},
+            {"pos": [2 * WIDTH // 4 + 60, HEIGHT // 2 + 40],  "label": "LOLB",},
+
+            # Defensive Backs
+            {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 - 110],  "label": "CB1"},
+            {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 + 135], "label": "CB2",},
+            {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 - 155], "label": "CB3", },
+            {"pos": [2 * WIDTH // 4 + 140, HEIGHT // 2 - 75],  "label": "FS",},
+            {"pos": [2 * WIDTH // 4 + 140, HEIGHT // 2 + 75],  "label": "SS",},
+
+            # D - Line
+            {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 - 38], "label": "DE1", },
+            {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 - 13],  "label": "DT1",},
+            {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 + 13],  "label": "DT2",},
+            {"pos": [2 * WIDTH // 4 + 20, HEIGHT // 2 + 38], "label": "DE2", },
+        ],  # Define Nickel positions here
     }}
