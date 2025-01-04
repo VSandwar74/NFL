@@ -37,6 +37,7 @@ YELLOW = (255, 255, 0)
 # Circle properties
 CIRCLE_RADIUS = 10  # Scaled-down size for players
 VECTOR_LENGTH = 50  # Default length of velocity vectors
+los_x = FIELD_WIDTH // 2  # Initial LOS position
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -49,12 +50,12 @@ model.eval()
 # Formations
 def get_red_offense():
     """Returns positions for the offense in an I-formation."""
-    positions = get_presets(HEIGHT, FIELD_WIDTH)["Offense"][current_formation["Offense"]]
+    positions = get_presets(HEIGHT, FIELD_WIDTH, los_x)["Offense"][current_formation["Offense"]]
     return [{"pos": pos["pos"], "label": pos["label"], "color": RED, "dragging": False, "vector": [0, 0]} for pos in positions]
 
 def get_blue_defense():
     """Returns positions for the defense in a 2-high man shell."""
-    positions = get_presets(HEIGHT, FIELD_WIDTH)["Defense"][current_formation["Defense"]]
+    positions = get_presets(HEIGHT, FIELD_WIDTH, los_x)["Defense"][current_formation["Defense"]]
     return [{"pos": pos["pos"], "label": pos["label"], "color": BLUE, "dragging": False, "vector": [0, 0]} for pos in positions]
 
 # Combine all players
@@ -101,28 +102,34 @@ def draw_play_dropdown():
     for i, formation in enumerate(["3-4", "4-3", "Nickel"]):
         rect = pygame.Rect(1180, y_offset, 100, 25)
         pygame.draw.rect(screen, GREY if current_formation["Defense"] != formation else YELLOW, rect)
-        text = font.render(formation, True, BLACK)
-        screen.blit(text, (1205, y_offset + 5))
+
+        text_surface = font.render(formation, True, BLACK)
+        text_rect = text_surface.get_rect(center=rect.center)  # Center the text rect
+        screen.blit(text_surface, text_rect)
+
         y_offset += 30
     y_offset += 75
     for i, formation in enumerate(["I-Form", "Singleback", "Shotgun"]):
         rect = pygame.Rect(1180, y_offset, 100, 25)
         pygame.draw.rect(screen, GREY if current_formation["Offense"] != formation else YELLOW, rect)
-        text = font.render(formation, True, BLACK)
-        screen.blit(text, (1205, y_offset + 5))
+
+        text_surface = font.render(formation, True, BLACK)
+        text_rect = text_surface.get_rect(center=rect.center)  # Center the text rect
+        screen.blit(text_surface, text_rect)
+
         y_offset += 30
 
 def handle_dropdown_click(pos):
     y_offset = 70
     for i, formation in enumerate(["3-4", "4-3", "Nickel"]):
-        if 10 <= pos[0] <= 110 and y_offset <= pos[1] <= y_offset + 25:
+        if y_offset <= pos[1] <= y_offset + 25:
             set_formation("Defense", formation)
             break
         y_offset += 30
     y_offset += 75
     for i, formation in enumerate(["I-Form", "Singleback", "Shotgun"]):
-        if 10 <= pos[0] <= 110 and y_offset <= pos[1] <= y_offset + 25:
-            set_formation("Defense", formation)
+        if y_offset <= pos[1] <= y_offset + 25:
+            set_formation("Offense", formation)
             break
         y_offset += 30
 
@@ -186,7 +193,7 @@ def draw_noise_dots(surface, noise_dots):  # Function to draw noise dots once
     for x, y, color in noise_dots:
         draw_circle_alpha(surface, color, (x, y), 1)
 
-def draw_field():
+def draw_field(dots):
     light_green = (54, 125, 8)  # Lighter green
     dark_green = (49, 108, 6)  # Darker green
     
@@ -210,12 +217,15 @@ def draw_field():
         rect = (50, y, FIELD_WIDTH - 100, 2) #Create a rectangle for the line
         draw_rect_alpha(screen, stripe_color, rect)
     
+    # Left and Right TD areas
+    pygame.draw.rect(screen, BLUE, (50, 50, 90, HEIGHT - 100))  # Left TD
+    pygame.draw.rect(screen, WHITE, (50, 50, 90, HEIGHT - 100), 5)
+
+    pygame.draw.rect(screen, RED, (FIELD_WIDTH - 140, 50, 90, HEIGHT - 100))  # Right TD
+    pygame.draw.rect(screen, WHITE, (FIELD_WIDTH - 140, 50, 90, HEIGHT - 100), 5)
+
     # Add random noise dots for texture
-    # for _ in range(1000):  # Adjust number for desired density
-    #     x = random.randint(50, FIELD_WIDTH - 50)
-    #     y = random.randint(50, HEIGHT - 50)
-    #     color = random.choice([(255, 255, 255, 30), (0, 0, 0, 30)])  # Subtle black or white
-    #     pygame.draw.circle(screen, color, (x, y), 1)
+    draw_noise_dots(screen, dots)
 
     # Draw white field outline
     pygame.draw.rect(screen, WHITE, (50, 50, FIELD_WIDTH - 100, HEIGHT - 100), 5)
@@ -225,15 +235,12 @@ def draw_field():
         x = 140 + i * (FIELD_WIDTH - 100) // 12
         pygame.draw.line(screen, WHITE, (x, 50), (x, HEIGHT - 50), 2)
 
-    # Left and Right TD areas
-    pygame.draw.rect(screen, RED, (50, 50, 90, HEIGHT - 100))  # Left TD
-    pygame.draw.rect(screen, WHITE, (50, 50, 90, HEIGHT - 100), 5)
-
-    pygame.draw.rect(screen, BLUE, (FIELD_WIDTH - 140, 50, 90, HEIGHT - 100))  # Right TD
-    pygame.draw.rect(screen, WHITE, (FIELD_WIDTH - 140, 50, 90, HEIGHT - 100), 5)
-
     # 50-yard line
     pygame.draw.line(screen, WHITE, (FIELD_WIDTH // 2, 50), (FIELD_WIDTH // 2, HEIGHT - 50), 5)
+
+    # Draw dotted line effect
+    for y in range(30, HEIGHT - 30, 10):  # Adjust spacing for dot density
+        pygame.draw.line(screen, YELLOW, (los_x, y), (los_x, y + 5), 3)  # Draw short line segments
 
 # Draw toggle button
 def draw_toggle():
@@ -241,6 +248,10 @@ def draw_toggle():
     font = pygame.font.Font(None, 24)
     text = font.render(mode, True, BLUE)
     screen.blit(text, (WIDTH // 2 - 30, 17))
+
+def update_los(los_x_offset):
+    for circle in circles:
+        circle["pos"][0] += los_x_offset
 
 # Draw velocity vector
 def draw_vector(circle):
@@ -250,12 +261,15 @@ def draw_vector(circle):
     pygame.draw.circle(screen, BLACK, end_pos, 5)
 
 # Draw play button
-def draw_play_button():
+def draw_play_button(playing):
     pygame.draw.circle(screen, YELLOW, (WIDTH - 70, 30), 20)
-    pygame.draw.polygon(screen, BLACK, [(WIDTH - 80, 20), (WIDTH - 60, 30), (WIDTH - 80, 40)])
+    if not playing:
+        pygame.draw.polygon(screen, BLACK, [(WIDTH - 80, 20), (WIDTH - 60, 30), (WIDTH - 80, 40)])
+    else:
+        pygame.draw.rect(screen, BLACK, (WIDTH - 80, 20, 5, 20))
+        pygame.draw.rect(screen, BLACK, (WIDTH - 65, 20, 5, 20))
 
 field_orientation = "horizontal"  # Default to horizontal
-
 def flip_orientation():
     global field_orientation
     field_orientation = "vertical" if field_orientation == "horizontal" else "horizontal"
@@ -271,7 +285,7 @@ def flip_orientation():
 #         y_offset += 30
 
 def set_formation(team, formation):
-    global current_formation, circles
+    global current_formation, circles, los_x
     current_formation[team] = formation
     circles = get_red_offense() + get_blue_defense()
     # positions = get_presets(HEIGHT, WIDTH)[team][formation]
@@ -299,6 +313,8 @@ playing = False
 start_time = None
 noise = 0
 dots = []
+dragging_los = False # Variable to track if the LOS is being dragged
+los_start_x = 0 # store the start x position of the mouse click
 
 # async def main():
 
@@ -336,10 +352,10 @@ while running:
                     start_time = current_time
                 else:
                     playing = False
-            # elif (event.pos[0] - (WIDTH - 70)) ** 2 + (event.pos[1] - 30) ** 2 <= 20 ** 2:
-            #     if not playing:
-            #         playing = True
-            #         start_time = current_time
+            # LOS Dragging
+            elif abs(event.pos[0] - los_x) < 5 and 50 < event.pos[1] < HEIGHT - 50: #Check if the click is within the LOS area
+                dragging_los = True
+                los_start_x = event.pos[0]
             else:
                 for circle in circles:
                     dx = event.pos[0] - circle["pos"][0]
@@ -349,6 +365,7 @@ while running:
         elif event.type == pygame.MOUSEBUTTONUP:
             for circle in circles:
                 circle["dragging"] = False
+            dragging_los = False # Stop dragging the LOS
         elif event.type == pygame.MOUSEMOTION:
             for circle in circles:
                 if circle["dragging"]:
@@ -364,6 +381,11 @@ while running:
                     elif mode == "Vector":
                         start_pos = circle["pos"]
                         circle["vector"] = [event.pos[0] - start_pos[0], event.pos[1] - start_pos[1]]
+            if dragging_los: # move the LOS based on mouse movement
+                los_offset = event.pos[0] - los_start_x
+                los_x += los_offset
+                los_start_x = event.pos[0]
+                update_los(los_offset)
         if event.type == pygame.KEYDOWN:
             # if event.key == pygame.K_SPACE:
             #     paused = not paused
@@ -380,15 +402,13 @@ while running:
             elif event.key == pygame.K_0:
                 set_formation("Defense", "Nickel")
 
-    draw_field()
-    draw_toggle()
-    draw_play_button()
-    draw_play_dropdown()
     if noise < 1:
         dots = get_noise(0.005)
-        # print(dots)
         noise += 1
-    draw_noise_dots(screen, dots)
+    draw_field(dots)
+    draw_toggle()
+    draw_play_button(playing)
+    draw_play_dropdown()
 
     # Get coverage prediction
     zone, man = predict_coverage(circles)
