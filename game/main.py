@@ -14,6 +14,7 @@ import torch
 from model import model, prepare_tensor
 import pandas as pd
 import asyncio
+import random
 
 # Initialize Pygame
 pygame.init()
@@ -92,7 +93,6 @@ def create_player_dataframe(circles):
             "defense": 1 if circle["color"] == BLUE else 0  # 1 for defense, 0 for offense
         })
 
-    print(pd.DataFrame(data))   
     return pd.DataFrame(data)
 
 def draw_play_dropdown():
@@ -114,12 +114,17 @@ def draw_play_dropdown():
 
 def handle_dropdown_click(pos):
     y_offset = 70
-    for i, formation in enumerate(["3-4", "4-3", "Nickel", "Dime"]):
+    for i, formation in enumerate(["3-4", "4-3", "Nickel"]):
         if 10 <= pos[0] <= 110 and y_offset <= pos[1] <= y_offset + 25:
             set_formation("Defense", formation)
             break
         y_offset += 30
-
+    y_offset += 75
+    for i, formation in enumerate(["I-Form", "Singleback", "Shotgun"]):
+        if 10 <= pos[0] <= 110 and y_offset <= pos[1] <= y_offset + 25:
+            set_formation("Defense", formation)
+            break
+        y_offset += 30
 
 def predict_coverage(circles):
   """
@@ -148,22 +153,86 @@ def predict_coverage(circles):
   return zone_prob, man_prob
 
 # Draw American football field
+def draw_rect_alpha(surface, color, rect):
+    shape_surf = pygame.Surface(pygame.Rect(rect).size, pygame.SRCALPHA)
+    pygame.draw.rect(shape_surf, color, shape_surf.get_rect())
+    surface.blit(shape_surf, rect)
+
+def draw_circle_alpha(surface, color, center, radius):
+    target_rect = pygame.Rect(center, (0, 0)).inflate((radius * 2, radius * 2))
+    shape_surf = pygame.Surface(target_rect.size, pygame.SRCALPHA)
+    pygame.draw.circle(shape_surf, color, (radius, radius), radius)
+    surface.blit(shape_surf, target_rect)
+
+def get_noise(density=0.01):  # Density controls the number of dots
+    noise_dots = []
+    area = (FIELD_WIDTH - 100) * (HEIGHT - 100)  # Usable area
+    num_dots = int(area * density)
+
+    # Calculate an approximate spacing based on the number of dots
+    spacing = math.sqrt(area / num_dots)
+
+    for i in range(num_dots):
+        #Distribute the dots somewhat evenly
+        x = int(50 + (i % int((FIELD_WIDTH - 100) / spacing)) * spacing + random.uniform(-spacing/4,spacing/4))
+        y = int(50 + (i // int((FIELD_WIDTH - 100) / spacing)) * spacing + random.uniform(-spacing/4,spacing/4))
+
+        color = random.choice([(255, 255, 255, 50), (0, 0, 0, 50)])
+        noise_dots.append((x, y, color))
+
+    return noise_dots
+
+def draw_noise_dots(surface, noise_dots):  # Function to draw noise dots once
+    for x, y, color in noise_dots:
+        draw_circle_alpha(surface, color, (x, y), 1)
+
 def draw_field():
-    screen.fill(GREEN)
+    light_green = (54, 125, 8)  # Lighter green
+    dark_green = (49, 108, 6)  # Darker green
+    
+    screen.fill(light_green)
+
+    # Alternate between lighter and darker green for every 10-yard segment
+    for i in range(10):
+        if i % 2 == 0:
+            pygame.draw.rect(screen, light_green, (140 + i * (FIELD_WIDTH - 280) // 10, 50, (FIELD_WIDTH - 140) // 10, HEIGHT - 100))
+        else:
+            pygame.draw.rect(screen, dark_green, (140 + i * (FIELD_WIDTH - 280) // 10, 50, (FIELD_WIDTH - 140) // 10, HEIGHT - 100))
+    
+    # # 1-pixel stripes slightly off-color across the field
+    # stripe_color = (30, 130, 30)  # Slightly darker green
+    # for y in range(50, HEIGHT - 50, 5):  # Spaced 5 pixels apart
+    #     pygame.draw.line(screen, stripe_color, (50, y), (FIELD_WIDTH - 50, y), 1)
+
+    # Draw transparent stripes using draw_rect_alpha
+    stripe_color = (30, 130, 30, 128)  # Slightly darker green with alpha (128 for 50% transparency)
+    for y in range(50, HEIGHT - 50, 5):  # Spaced 5 pixels apart
+        rect = (50, y, FIELD_WIDTH - 100, 2) #Create a rectangle for the line
+        draw_rect_alpha(screen, stripe_color, rect)
+    
+    # Add random noise dots for texture
+    # for _ in range(1000):  # Adjust number for desired density
+    #     x = random.randint(50, FIELD_WIDTH - 50)
+    #     y = random.randint(50, HEIGHT - 50)
+    #     color = random.choice([(255, 255, 255, 30), (0, 0, 0, 30)])  # Subtle black or white
+    #     pygame.draw.circle(screen, color, (x, y), 1)
+
+    # Draw white field outline
     pygame.draw.rect(screen, WHITE, (50, 50, FIELD_WIDTH - 100, HEIGHT - 100), 5)
 
-    # Yardage Lines
+    # Yardage lines
     for i in range(1, 10):
-        x = 140 + i * (FIELD_WIDTH - 280) // 10
+        x = 140 + i * (FIELD_WIDTH - 100) // 12
         pygame.draw.line(screen, WHITE, (x, 50), (x, HEIGHT - 50), 2)
 
-    # Left and Right TD
-    pygame.draw.rect(screen, RED, (50, 50, 90, HEIGHT - 100))
+    # Left and Right TD areas
+    pygame.draw.rect(screen, RED, (50, 50, 90, HEIGHT - 100))  # Left TD
     pygame.draw.rect(screen, WHITE, (50, 50, 90, HEIGHT - 100), 5)
-    pygame.draw.rect(screen, BLUE, (FIELD_WIDTH - 140, 50, 90, HEIGHT - 100))
+
+    pygame.draw.rect(screen, BLUE, (FIELD_WIDTH - 140, 50, 90, HEIGHT - 100))  # Right TD
     pygame.draw.rect(screen, WHITE, (FIELD_WIDTH - 140, 50, 90, HEIGHT - 100), 5)
 
-    # 50 yd line
+    # 50-yard line
     pygame.draw.line(screen, WHITE, (FIELD_WIDTH // 2, 50), (FIELD_WIDTH // 2, HEIGHT - 50), 5)
 
 # Draw toggle button
@@ -228,6 +297,8 @@ active_position = "Cursor"
 mode = "Position"  # Default mode
 playing = False
 start_time = None
+noise = 0
+dots = []
 
 # async def main():
 
@@ -238,6 +309,7 @@ clock = pygame.time.Clock()
 while running:
     current_time = pygame.time.get_ticks() / 1000  # Time in seconds
     elapsed_time = 0
+
     if playing and start_time:
         elapsed_time = current_time - start_time
         start_time = current_time
@@ -251,18 +323,23 @@ while running:
         if event.type == pygame.QUIT:
             running = False
         elif event.type == pygame.MOUSEBUTTONDOWN:
-
             # print(circles)
-            if 10 <= event.pos[0] <= 110:
+            if 1180 <= event.pos[0] <= WIDTH and 70 <= event.pos[1] <= HEIGHT:
                 handle_dropdown_click(event.pos)
             # Toggle mode button
             elif WIDTH // 2 - 50 <= event.pos[0] <= WIDTH // 2 + 50 and 10 <= event.pos[1] <= 50:
                 mode = "Vector" if mode == "Position" else "Position"
             # Play button
-            elif (event.pos[0] - (WIDTH - 70)) ** 2 + (event.pos[1] - 30) ** 2 <= 20 ** 2:
+            elif (event.pos[0] - (WIDTH - 70))**2 + (event.pos[1] - 30)**2 <= 20**2:
                 if not playing:
                     playing = True
                     start_time = current_time
+                else:
+                    playing = False
+            # elif (event.pos[0] - (WIDTH - 70)) ** 2 + (event.pos[1] - 30) ** 2 <= 20 ** 2:
+            #     if not playing:
+            #         playing = True
+            #         start_time = current_time
             else:
                 for circle in circles:
                     dx = event.pos[0] - circle["pos"][0]
@@ -288,6 +365,8 @@ while running:
                         start_pos = circle["pos"]
                         circle["vector"] = [event.pos[0] - start_pos[0], event.pos[1] - start_pos[1]]
         if event.type == pygame.KEYDOWN:
+            # if event.key == pygame.K_SPACE:
+            #     paused = not paused
             if event.key == pygame.K_1:  
                 set_formation("Offense", "I-Form")
             elif event.key == pygame.K_2:  
@@ -298,11 +377,18 @@ while running:
                 set_formation("Defense", "4-3")
             elif event.key == pygame.K_9:
                 set_formation("Defense", "3-4")
+            elif event.key == pygame.K_0:
+                set_formation("Defense", "Nickel")
 
     draw_field()
     draw_toggle()
     draw_play_button()
     draw_play_dropdown()
+    if noise < 1:
+        dots = get_noise(0.005)
+        # print(dots)
+        noise += 1
+    draw_noise_dots(screen, dots)
 
     # Get coverage prediction
     zone, man = predict_coverage(circles)
