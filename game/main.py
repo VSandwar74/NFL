@@ -13,6 +13,7 @@ from model import model, prepare_tensor
 import pandas as pd
 import asyncio
 import random
+import requests
 
 # Initialize Pygame
 pygame.init()
@@ -22,6 +23,7 @@ WIDTH, HEIGHT = 1330, 580  # 150 px for dropdown menu
 FIELD_WIDTH = WIDTH - 150 # true dimensions are 120x53.3 scaled up to 1080x480, plus 50 px on each side
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("American Football Formation")
+API_URL = "http://127.0.0.1:8000"
 
 # Colors
 GREEN = (34, 139, 34)
@@ -29,7 +31,7 @@ WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 BLUE = (0, 0, 255)
 BLACK = (0, 0, 0)
-GREY = (200, 200, 200)
+GRAY = (200, 200, 200)
 YELLOW = (255, 255, 0)
 
 # Circle properties
@@ -39,7 +41,6 @@ los_x = FIELD_WIDTH // 2  # Initial LOS position
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
 current_formation = {"Offense": "Singleback", "Defense": "3-4"}
 
 model.load_state_dict(torch.load('./best_model_week3.pth', weights_only=True, map_location=DEVICE))
@@ -48,16 +49,21 @@ model.eval()
 # Formations
 def get_red_offense():
     """Returns positions for the offense in an I-formation."""
+    if current_formation["Offense"] == 'Custom':
+        return circles
     positions = get_presets(HEIGHT, FIELD_WIDTH, los_x)["Offense"][current_formation["Offense"]]
     return [{"pos": pos["pos"], "label": pos["label"], "color": RED, "dragging": False, "vector": [0, 0]} for pos in positions]
 
 def get_blue_defense():
     """Returns positions for the defense in a 2-high man shell."""
+    if current_formation["Defense"] == 'Custom':
+        return circles  
     positions = get_presets(HEIGHT, FIELD_WIDTH, los_x)["Defense"][current_formation["Defense"]]
     return [{"pos": pos["pos"], "label": pos["label"], "color": BLUE, "dragging": False, "vector": [0, 0]} for pos in positions]
 
 # Combine all players
 circles = get_red_offense() + get_blue_defense()
+
 def create_player_dataframe(circles):
     """
     Creates a pandas DataFrame from the list of player positions and vectors.
@@ -99,7 +105,7 @@ def draw_play_dropdown():
     y_offset = 70  # Start dropdown below toggle
     for i, formation in enumerate(["3-4", "4-3", "Nickel"]):
         rect = pygame.Rect(1180, y_offset, 100, 25)
-        pygame.draw.rect(screen, GREY if current_formation["Defense"] != formation else YELLOW, rect)
+        pygame.draw.rect(screen, GRAY if current_formation["Defense"] != formation else YELLOW, rect)
 
         text_surface = font.render(formation, True, BLACK)
         text_rect = text_surface.get_rect(center=rect.center)  # Center the text rect
@@ -109,7 +115,7 @@ def draw_play_dropdown():
     y_offset += 75
     for i, formation in enumerate(["I-Form", "Singleback", "Shotgun"]):
         rect = pygame.Rect(1180, y_offset, 100, 25)
-        pygame.draw.rect(screen, GREY if current_formation["Offense"] != formation else YELLOW, rect)
+        pygame.draw.rect(screen, GRAY if current_formation["Offense"] != formation else YELLOW, rect)
 
         text_surface = font.render(formation, True, BLACK)
         text_rect = text_surface.get_rect(center=rect.center)  # Center the text rect
@@ -242,7 +248,7 @@ def draw_field(dots):
 
 # Draw toggle button
 def draw_toggle():
-    pygame.draw.rect(screen, GREY, (WIDTH // 2 - 50, 10, 100, 30), border_radius=10)
+    pygame.draw.rect(screen, GRAY, (WIDTH // 2 - 50, 10, 100, 30), border_radius=10)
     font = pygame.font.Font(None, 24)
     text = font.render(mode, True, BLUE)
     screen.blit(text, (WIDTH // 2 - 30, 17))
@@ -272,6 +278,28 @@ def flip_orientation():
     global field_orientation
     field_orientation = "vertical" if field_orientation == "horizontal" else "horizontal"
 
+def draw_input_box(input_box_active, input_text):
+    global input_box, button_rect
+    # Input box
+    input_box = pygame.Rect(1155, HEIGHT - 100, 150, 30)
+
+    # Button
+    button_rect = pygame.Rect(1205, HEIGHT - 50, 50, 30)
+
+    # Draw the input box
+    if input_box_active:
+        pygame.draw.rect(screen, GRAY, input_box, 2)  # Draw a thicker border for focus
+    else:
+        pygame.draw.rect(screen, BLUE, input_box)
+    text_surface = pygame.font.Font(None, 25).render(input_text, True, BLACK)
+    text_rect = text_surface.get_rect(center=input_box.center)
+    screen.blit(text_surface, text_rect)
+
+    # Draw the button
+    pygame.draw.rect(screen, GRAY, button_rect)
+    button_text = pygame.font.Font(None, 25).render("Send", True, BLACK)
+    button_text_rect = button_text.get_rect(center=button_rect.center)
+    screen.blit(button_text, button_text_rect)
 
 # def draw_dropdown_menu():
 #     # Render dropdown menu for formations
@@ -281,12 +309,52 @@ def flip_orientation():
 #         text_surface = font.render(f"{team}: {current_formation[team]}", True, BLACK)
 #         screen.blit(text_surface, (10, y_offset))
 #         y_offset += 30
+def handle_api_request():
+    global input_text, input_box_active
+    gameId, playId = input_text.split('_')
+    endpoint = f"{API_URL}/tracking/?gameId={gameId}&playId={playId}"
+    try:
+        response = requests.get(endpoint)
+        response.raise_for_status()  # Raise an exception for bad status codes
+        data = response.json()  # Print the API response (if applicable)
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending data to API: {e}")
+    input_text = ''  # Clear the input box after sending
+    input_box_active = False  # Deactivate the input box
+
+    los, direction = None, None
+    df = pd.DataFrame(data['data'])
+    print(df)
+    for idx, row in df.iterrows():
+        if row['club'] == 'football':
+            los = row['x']
+            direction = row['playDirection']
+            break
+    circles = []
+    for idx, row in df.iterrows():
+        if row.club == 'football':
+            continue
+        circles.append({
+            "pos": [round(row.x * 9 + 50, 2), round(row.y * 9 + 50, 2)],
+            "label": row.displayName.split(' ')[-1],
+            "color": (0, 0, 255) if (direction == 'left' and row['x'] < los) or (direction == 'right' and row['x'] > los) else (255, 0, 0),
+            "dragging": False,
+            "vector": [(row.s * 9 + 50) * math.cos(float(row.dir) - 90), (row.s * 9 + 50) * math.sin(float(row.dir) - 90)],
+        })
+    use_preset_positions(circles, los * 9 + 50)
 
 def set_formation(team, formation):
     global current_formation, circles, los_x
     current_formation[team] = formation
     circles = get_red_offense() + get_blue_defense()
     # positions = get_presets(HEIGHT, WIDTH)[team][formation]
+
+def use_preset_positions(preset, new_los):
+    global current_formation, circles, los_x
+    current_formation["Offense"] = 'Custom'
+    current_formation["Defense"] = 'Custom'
+    los_x = new_los
+    circles = preset
 
 # Update player positions
 def update_positions(elapsed_time):
@@ -313,7 +381,8 @@ noise = 0
 dots = []
 dragging_los = False # Variable to track if the LOS is being dragged
 los_start_x = 0 # store the start x position of the mouse click
-
+input_text = ''
+input_box_active = False
 
 # Main loop
 running = True
@@ -359,6 +428,13 @@ while running:
                     dy = event.pos[1] - circle["pos"][1]
                     if dx * dx + dy * dy <= CIRCLE_RADIUS * CIRCLE_RADIUS:
                         circle["dragging"] = True
+            # handle input box
+            if input_box.collidepoint(event.pos):
+                input_box_active = True
+            else:
+                input_box_active = False
+            if button_rect.collidepoint(event.pos):
+                handle_api_request()
         elif event.type == pygame.MOUSEBUTTONUP:
             for circle in circles:
                 circle["dragging"] = False
@@ -384,20 +460,29 @@ while running:
                 los_start_x = event.pos[0]
                 update_los(los_offset)
         if event.type == pygame.KEYDOWN:
-            # if event.key == pygame.K_SPACE:
-            #     paused = not paused
-            if event.key == pygame.K_1:  
-                set_formation("Offense", "I-Form")
-            elif event.key == pygame.K_2:  
-                set_formation("Offense", "Singleback")
-            elif event.key == pygame.K_3:  
-                set_formation("Offense", "Shotgun")
-            elif event.key == pygame.K_8:
-                set_formation("Defense", "4-3")
-            elif event.key == pygame.K_9:
-                set_formation("Defense", "3-4")
-            elif event.key == pygame.K_0:
-                set_formation("Defense", "Nickel")
+            if input_box_active:
+                if event.key == pygame.K_RETURN:
+                    # Send data to API
+                    handle_api_request()
+                elif event.key == pygame.K_BACKSPACE:
+                    input_text = input_text[:-1]
+                else:
+                    input_text += event.unicode
+            else:
+                # if event.key == pygame.K_SPACE:
+                #     paused = not paused
+                if event.key == pygame.K_1:  
+                    set_formation("Offense", "I-Form")
+                elif event.key == pygame.K_2:  
+                    set_formation("Offense", "Singleback")
+                elif event.key == pygame.K_3:  
+                    set_formation("Offense", "Shotgun")
+                elif event.key == pygame.K_8:
+                    set_formation("Defense", "4-3")
+                elif event.key == pygame.K_9:
+                    set_formation("Defense", "3-4")
+                elif event.key == pygame.K_0:
+                    set_formation("Defense", "Nickel")
 
     if noise < 1:
         dots = get_noise(0.005)
@@ -406,6 +491,7 @@ while running:
     draw_toggle()
     draw_play_button(playing)
     draw_play_dropdown()
+    draw_input_box(input_box_active, input_text)
 
     # Get coverage prediction
     zone, man = predict_coverage(circles)
