@@ -1,3 +1,5 @@
 /game/venv/*
 /game/__pycache__/*
 /game/sample_load.csv
+/server/venv/*
+/server/.env
