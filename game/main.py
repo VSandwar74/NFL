@@ -1,7 +1,5 @@
 # TODO
 '''
-- play dropdown
-    - defensive alignments/adjustments
 - camera angle
 '''
 
@@ -316,7 +314,6 @@ dots = []
 dragging_los = False # Variable to track if the LOS is being dragged
 los_start_x = 0 # store the start x position of the mouse click
 
-# async def main():
 
 # Main loop
 running = True
@@ -438,6 +435,3 @@ while running:
 
 pygame.quit()
 sys.exit()
-    # await asyncio.sleep(0)
-
-# asyncio.run(main())

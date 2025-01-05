@@ -1,5 +1,9 @@
-/game/venv/*
-/game/__pycache__/*
+/game/venv
+/game/__pycache__
 /game/sample_load.csv
-/server/venv/*
+/server/venv
+/server/__pycache__
 /server/.env
+/kaggle
+/game/build
+*.csv
