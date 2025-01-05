@@ -1,26 +1,33 @@
-# Use the official Python image as the base image
+# Use an official Python image from the Python Docker Hub repository
 FROM python:3.9-slim
 
-# Set the working directory inside the container
+# Set working directory in container
 WORKDIR /app
 
-# Copy the requirements.txt into the container
+# Copy only the requirements.txt first to leverage Docker layer caching
 COPY requirements.txt .
 
-# Create a virtual environment inside the container
-RUN python -m venv /venv
+# Install dependencies
+RUN python -m venv /venv && \
+    /venv/bin/pip install --upgrade pip && \
+    /venv/bin/pip install -r requirements.txt
 
-# Set the environment variable to use the venv's Python and pip
-ENV PATH="/venv/bin:$PATH"
-
-# Install the required packages in the virtual environment
-RUN pip install --upgrade pip && pip install -r requirements.txt
-
-# Copy the application files into the container
+RUN --mount=type=secret,id=_env,dst=/etc/secrets/.env \
+    pip install -r requirements.txt
+    
+# Copy the rest of the application
 COPY . .
 
-# Expose the port that uvicorn will run on
+# Build argument for secret
+ARG SUPABASE_URL
+ARG SERVICE_URL
+
+# Set environment variable during runtime
+ENV SUPABASE_URL=$SUPABASE_URL
+ENV SERVICE_URL=$SERVICE_URL
+
+# Expose the port that your application will use
 EXPOSE 8000
 
-# Run the FastAPI app with uvicorn
-CMD ["uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
+# Command to run FastAPI with uvicorn in the container
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
