@@ -23,7 +23,7 @@ WIDTH, HEIGHT = 1330, 580  # 150 px for dropdown menu
 FIELD_WIDTH = WIDTH - 150 # true dimensions are 120x53.3 scaled up to 1080x480, plus 50 px on each side
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("American Football Formation")
-API_URL = "http://127.0.0.1:8000"
+API_URL = "https://nfl-f1ma.onrender.com"
 
 # Colors
 GREEN = (34, 139, 34)
