@@ -1,8 +1,4 @@
-# TODO
-'''
-- camera angle
-'''
-
+import numpy as np
 import pygame
 import sys
 import math
@@ -14,6 +10,10 @@ import pandas as pd
 import asyncio
 import random
 import requests
+
+# TODO
+# - Add horizontal/vertical swap
+
 
 # Initialize Pygame
 pygame.init()
@@ -34,27 +34,22 @@ BLACK = (0, 0, 0)
 GRAY = (200, 200, 200)
 YELLOW = (255, 255, 0)
 
+current_formation = {"Offense": "Singleback", "Defense": "3-4"}
+
 # Circle properties
 CIRCLE_RADIUS = 10  # Scaled-down size for players
 VECTOR_LENGTH = 50  # Default length of velocity vectors
-los_x = FIELD_WIDTH // 2  # Initial LOS position
-
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-current_formation = {"Offense": "Singleback", "Defense": "3-4"}
-
-model.load_state_dict(torch.load('./best_model_week3.pth', weights_only=True, map_location=DEVICE))
-model.eval()
-
 # Formations
-def get_red_offense():
+def get_red_offense(los_x):
     """Returns positions for the offense in an I-formation."""
     if current_formation["Offense"] == 'Custom':
         return circles
     positions = get_presets(HEIGHT, FIELD_WIDTH, los_x)["Offense"][current_formation["Offense"]]
     return [{"pos": pos["pos"], "label": pos["label"], "color": RED, "dragging": False, "vector": [0, 0]} for pos in positions]
 
-def get_blue_defense():
+def get_blue_defense(los_x):
     """Returns positions for the defense in a 2-high man shell."""
     if current_formation["Defense"] == 'Custom':
         return circles  
@@ -62,7 +57,7 @@ def get_blue_defense():
     return [{"pos": pos["pos"], "label": pos["label"], "color": BLUE, "dragging": False, "vector": [0, 0]} for pos in positions]
 
 # Combine all players
-circles = get_red_offense() + get_blue_defense()
+# circles = get_red_offense() + get_blue_defense()
 
 def create_player_dataframe(circles):
     """
@@ -197,7 +192,7 @@ def draw_noise_dots(surface, noise_dots):  # Function to draw noise dots once
     for x, y, color in noise_dots:
         draw_circle_alpha(surface, color, (x, y), 1)
 
-def draw_field(dots):
+def draw_field(dots, los_x):
     light_green = (54, 125, 8)  # Lighter green
     dark_green = (49, 108, 6)  # Darker green
     
@@ -247,7 +242,7 @@ def draw_field(dots):
         pygame.draw.line(screen, YELLOW, (los_x, y), (los_x, y + 5), 3)  # Draw short line segments
 
 # Draw toggle button
-def draw_toggle():
+def draw_toggle(mode):
     pygame.draw.rect(screen, GRAY, (WIDTH // 2 - 50, 10, 100, 30), border_radius=10)
     font = pygame.font.Font(None, 24)
     text = font.render(mode, True, BLUE)
@@ -309,8 +304,7 @@ def draw_input_box(input_box_active, input_text):
 #         text_surface = font.render(f"{team}: {current_formation[team]}", True, BLACK)
 #         screen.blit(text_surface, (10, y_offset))
 #         y_offset += 30
-def handle_api_request():
-    global input_text, input_box_active
+def handle_api_request(input_text, input_box_active):
     gameId, playId = input_text.split('_')
     endpoint = f"{API_URL}/tracking/?gameId={gameId}&playId={playId}"
     try:
@@ -339,7 +333,7 @@ def handle_api_request():
             "label": row.displayName.split(' ')[-1],
             "color": (0, 0, 255) if (direction == 'left' and row['x'] < los) or (direction == 'right' and row['x'] > los) else (255, 0, 0),
             "dragging": False,
-            "vector": [(row.s * 9 + 50) * math.cos(float(row.dir) - 90), (row.s * 9 + 50) * math.sin(float(row.dir) - 90)],
+            "vector": [(row.s * 9) * math.cos(float(row.dir) - 90), (row.s * 9) * math.sin(float(row.dir) - 90)],
         })
     use_preset_positions(circles, los * 9 + 50)
 
@@ -372,152 +366,163 @@ def update_positions(elapsed_time):
         circle["vector"][0] *= (1 - elapsed_time)
         circle["vector"][1] *= (1 - elapsed_time)
 
-# Variables
-active_position = "Cursor"
-mode = "Position"  # Default mode
-playing = False
-start_time = None
-noise = 0
-dots = []
-dragging_los = False # Variable to track if the LOS is being dragged
-los_start_x = 0 # store the start x position of the mouse click
-input_text = ''
-input_box_active = False
+async def main():
 
-# Main loop
-running = True
-clock = pygame.time.Clock()
+    # Variables
+    active_position = "Cursor"
+    mode = "Position"  # Default mode
+    playing = False
+    start_time = None
+    noise = 0
+    dots = []
+    dragging_los = False # Variable to track if the LOS is being dragged
+    los_start_x = 0 # store the start x position of the mouse click
+    input_text = ''
+    input_box_active = False
+    los_x = FIELD_WIDTH // 2  # Initial LOS position
 
-while running:
-    current_time = pygame.time.get_ticks() / 1000  # Time in seconds
-    elapsed_time = 0
+    circles = get_red_offense(los_x) + get_blue_defense(los_x)
 
-    if playing and start_time:
-        elapsed_time = current_time - start_time
-        start_time = current_time
-        update_positions(elapsed_time)
-        # Stop animation after 1 second
-        if elapsed_time >= 1:
-            playing = False
-            start_time = None
+    model.load_state_dict(torch.load('./best_model_week3.pth', weights_only=True, map_location=DEVICE))
+    model.eval()
 
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            # print(circles)
-            if 1180 <= event.pos[0] <= WIDTH and 70 <= event.pos[1] <= HEIGHT:
-                handle_dropdown_click(event.pos)
-            # Toggle mode button
-            elif WIDTH // 2 - 50 <= event.pos[0] <= WIDTH // 2 + 50 and 10 <= event.pos[1] <= 50:
-                mode = "Vector" if mode == "Position" else "Position"
-            # Play button
-            elif (event.pos[0] - (WIDTH - 70))**2 + (event.pos[1] - 30)**2 <= 20**2:
-                if not playing:
-                    playing = True
-                    start_time = current_time
+    # Main loop
+    running = True
+    clock = pygame.time.Clock()
+
+    while running:
+        current_time = pygame.time.get_ticks() / 1000  # Time in seconds
+        elapsed_time = 0
+
+        if playing and start_time:
+            elapsed_time = current_time - start_time
+            start_time = current_time
+            update_positions(elapsed_time)
+            # Stop animation after 1 second
+            if elapsed_time >= 1:
+                playing = False
+                start_time = None
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                # print(circles)
+                if 1180 <= event.pos[0] <= WIDTH and 70 <= event.pos[1] <= HEIGHT:
+                    handle_dropdown_click(event.pos)
+                # Toggle mode button
+                elif WIDTH // 2 - 50 <= event.pos[0] <= WIDTH // 2 + 50 and 10 <= event.pos[1] <= 50:
+                    mode = "Vector" if mode == "Position" else "Position"
+                # Play button
+                elif (event.pos[0] - (WIDTH - 70))**2 + (event.pos[1] - 30)**2 <= 20**2:
+                    if not playing:
+                        playing = True
+                        start_time = current_time
+                    else:
+                        playing = False
+                # LOS Dragging
+                elif abs(event.pos[0] - los_x) < 5 and 50 < event.pos[1] < HEIGHT - 50: #Check if the click is within the LOS area
+                    dragging_los = True
+                    los_start_x = event.pos[0]
                 else:
-                    playing = False
-            # LOS Dragging
-            elif abs(event.pos[0] - los_x) < 5 and 50 < event.pos[1] < HEIGHT - 50: #Check if the click is within the LOS area
-                dragging_los = True
-                los_start_x = event.pos[0]
-            else:
+                    for circle in circles:
+                        dx = event.pos[0] - circle["pos"][0]
+                        dy = event.pos[1] - circle["pos"][1]
+                        if dx * dx + dy * dy <= CIRCLE_RADIUS * CIRCLE_RADIUS:
+                            circle["dragging"] = True
+                # handle input box
+                if input_box.collidepoint(event.pos):
+                    input_box_active = True
+                else:
+                    input_box_active = False
+                if button_rect.collidepoint(event.pos):
+                    handle_api_request(input_text, input_box_active)
+            elif event.type == pygame.MOUSEBUTTONUP:
                 for circle in circles:
-                    dx = event.pos[0] - circle["pos"][0]
-                    dy = event.pos[1] - circle["pos"][1]
-                    if dx * dx + dy * dy <= CIRCLE_RADIUS * CIRCLE_RADIUS:
-                        circle["dragging"] = True
-            # handle input box
-            if input_box.collidepoint(event.pos):
-                input_box_active = True
-            else:
-                input_box_active = False
-            if button_rect.collidepoint(event.pos):
-                handle_api_request()
-        elif event.type == pygame.MOUSEBUTTONUP:
-            for circle in circles:
-                circle["dragging"] = False
-            dragging_los = False # Stop dragging the LOS
-        elif event.type == pygame.MOUSEMOTION:
-            for circle in circles:
-                if circle["dragging"]:
-                    if mode == "Position":
-                        new_x, new_y = event.pos
-                        # Boundaries
-                        if 50 < new_x < WIDTH - 50 and 50 < new_y < HEIGHT - 50:
-                            circle["pos"] = [new_x, new_y]
-                            # LOS Bounds
-                            # if circle["color"] == RED: # and new_x < WIDTH // 2:
-                            # elif circle["color"] == BLUE: # and new_x > WIDTH // 2:
-                            #     circle["pos"] = [new_x, new_y]
-                    elif mode == "Vector":
-                        start_pos = circle["pos"]
-                        circle["vector"] = [event.pos[0] - start_pos[0], event.pos[1] - start_pos[1]]
-            if dragging_los: # move the LOS based on mouse movement
-                los_offset = event.pos[0] - los_start_x
-                los_x += los_offset
-                los_start_x = event.pos[0]
-                update_los(los_offset)
-        if event.type == pygame.KEYDOWN:
-            if input_box_active:
-                if event.key == pygame.K_RETURN:
-                    # Send data to API
-                    handle_api_request()
-                elif event.key == pygame.K_BACKSPACE:
-                    input_text = input_text[:-1]
+                    circle["dragging"] = False
+                dragging_los = False # Stop dragging the LOS
+            elif event.type == pygame.MOUSEMOTION:
+                for circle in circles:
+                    if circle["dragging"]:
+                        if mode == "Position":
+                            new_x, new_y = event.pos
+                            # Boundaries
+                            if 50 < new_x < WIDTH - 50 and 50 < new_y < HEIGHT - 50:
+                                circle["pos"] = [new_x, new_y]
+                                # LOS Bounds
+                                # if circle["color"] == RED: # and new_x < WIDTH // 2:
+                                # elif circle["color"] == BLUE: # and new_x > WIDTH // 2:
+                                #     circle["pos"] = [new_x, new_y]
+                        elif mode == "Vector":
+                            start_pos = circle["pos"]
+                            circle["vector"] = [event.pos[0] - start_pos[0], event.pos[1] - start_pos[1]]
+                if dragging_los: # move the LOS based on mouse movement
+                    los_offset = event.pos[0] - los_start_x
+                    los_x += los_offset
+                    los_start_x = event.pos[0]
+                    update_los(los_offset)
+            if event.type == pygame.KEYDOWN:
+                if input_box_active:
+                    if event.key == pygame.K_RETURN:
+                        # Send data to API
+                        handle_api_request(input_text, input_box_active)
+                    elif event.key == pygame.K_BACKSPACE:
+                        input_text = input_text[:-1]
+                    else:
+                        input_text += event.unicode
                 else:
-                    input_text += event.unicode
-            else:
-                # if event.key == pygame.K_SPACE:
-                #     paused = not paused
-                if event.key == pygame.K_1:  
-                    set_formation("Offense", "I-Form")
-                elif event.key == pygame.K_2:  
-                    set_formation("Offense", "Singleback")
-                elif event.key == pygame.K_3:  
-                    set_formation("Offense", "Shotgun")
-                elif event.key == pygame.K_8:
-                    set_formation("Defense", "4-3")
-                elif event.key == pygame.K_9:
-                    set_formation("Defense", "3-4")
-                elif event.key == pygame.K_0:
-                    set_formation("Defense", "Nickel")
+                    # if event.key == pygame.K_SPACE:
+                    #     paused = not paused
+                    if event.key == pygame.K_1:  
+                        set_formation("Offense", "I-Form")
+                    elif event.key == pygame.K_2:  
+                        set_formation("Offense", "Singleback")
+                    elif event.key == pygame.K_3:  
+                        set_formation("Offense", "Shotgun")
+                    elif event.key == pygame.K_8:
+                        set_formation("Defense", "4-3")
+                    elif event.key == pygame.K_9:
+                        set_formation("Defense", "3-4")
+                    elif event.key == pygame.K_0:
+                        set_formation("Defense", "Nickel")
 
-    if noise < 1:
-        dots = get_noise(0.005)
-        noise += 1
-    draw_field(dots)
-    draw_toggle()
-    draw_play_button(playing)
-    draw_play_dropdown()
-    draw_input_box(input_box_active, input_text)
+        if noise < 1:
+            dots = get_noise(0.005)
+            noise += 1
+        draw_field(dots, los_x)
+        draw_toggle(mode)
+        draw_play_button(playing)
+        draw_play_dropdown()
+        draw_input_box(input_box_active, input_text)
 
-    # Get coverage prediction
-    zone, man = predict_coverage(circles)
-    font = pygame.font.Font(None, 24)
-    text = font.render(f"Zone: {zone:.2f}, Man: {man:.2f}", True, BLACK)
-    screen.blit(text, (WIDTH // 2 - 75, HEIGHT - 30))
+        # Get coverage prediction
+        zone, man = predict_coverage(circles)
+        font = pygame.font.Font(None, 24)
+        text = font.render(f"Zone: {zone:.2f}, Man: {man:.2f}", True, BLACK)
+        screen.blit(text, (WIDTH // 2 - 75, HEIGHT - 30))
 
-    cursor_pos = pygame.mouse.get_pos()
-    font = pygame.font.Font(None, 24)
-    text = font.render(f"{active_position}: {cursor_pos}", True, BLACK)
-    screen.blit(text, (10, 10))
+        cursor_pos = pygame.mouse.get_pos()
+        font = pygame.font.Font(None, 24)
+        text = font.render(f"{active_position}: {cursor_pos}", True, BLACK)
+        screen.blit(text, (10, 10))
 
-    # Draw players
-    font = pygame.font.Font(None, 24)
-    for circle in circles:
-        pygame.draw.circle(screen, circle["color"], circle["pos"], CIRCLE_RADIUS)
-        dx = pygame.mouse.get_pos()[0] - circle["pos"][0]
-        dy = pygame.mouse.get_pos()[1] - circle["pos"][1]
-        if dx * dx + dy * dy <= CIRCLE_RADIUS * CIRCLE_RADIUS:
-            label_text = font.render(f"{circle['label']}", True, BLACK)
-            active_position = circle['label']
-            screen.blit(label_text, (circle["pos"][0] + 15, circle["pos"][1] - 15))
-        draw_vector(circle)
+        # Draw players
+        font = pygame.font.Font(None, 24)
+        for circle in circles:
+            pygame.draw.circle(screen, circle["color"], circle["pos"], CIRCLE_RADIUS)
+            dx = pygame.mouse.get_pos()[0] - circle["pos"][0]
+            dy = pygame.mouse.get_pos()[1] - circle["pos"][1]
+            if dx * dx + dy * dy <= CIRCLE_RADIUS * CIRCLE_RADIUS:
+                label_text = font.render(f"{circle['label']}", True, BLACK)
+                active_position = circle['label']
+                screen.blit(label_text, (circle["pos"][0] + 15, circle["pos"][1] - 15))
+            draw_vector(circle)
 
-    pygame.display.flip()
-    clock.tick(60)
+        pygame.display.flip()
+        clock.tick(60)
+        await asyncio.sleep(0) 
 
-pygame.quit()
-sys.exit()
+    pygame.quit()
+    sys.exit()
+
+asyncio.run(main())
