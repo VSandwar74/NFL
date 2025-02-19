@@ -1,15 +1,23 @@
-import numpy as np
+# import numpy as np
+import select
 import pygame
 import sys
 import math
 from pygame.locals import *
 from formations import get_presets
-import torch
-from model import model, prepare_tensor
-import pandas as pd
-import asyncio
+import pygbag
+
+import pygbag.aio as asyncio
+# import asyncio
+import aiohttp
+
+import json
 import random
-import requests
+import base64
+import socket
+import os
+import hashlib
+
 
 # TODO
 # - Add horizontal/vertical swap
@@ -23,7 +31,10 @@ WIDTH, HEIGHT = 1330, 580  # 150 px for dropdown menu
 FIELD_WIDTH = WIDTH - 150 # true dimensions are 120x53.3 scaled up to 1080x480, plus 50 px on each side
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("American Football Formation")
-API_URL = "https://nfl-f1ma.onrender.com"
+
+API_URL = "0.0.0.0:8000"
+# API_URL = "https://nfl-f1ma.onrender.com"
+
 
 # Colors
 GREEN = (34, 139, 34)
@@ -39,8 +50,6 @@ current_formation = {"Offense": "Singleback", "Defense": "3-4"}
 # Circle properties
 CIRCLE_RADIUS = 10  # Scaled-down size for players
 VECTOR_LENGTH = 50  # Default length of velocity vectors
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 # Formations
 def get_red_offense(los_x):
     """Returns positions for the offense in an I-formation."""
@@ -58,42 +67,6 @@ def get_blue_defense(los_x):
 
 # Combine all players
 # circles = get_red_offense() + get_blue_defense()
-
-def create_player_dataframe(circles):
-    """
-    Creates a pandas DataFrame from the list of player positions and vectors.
-
-    Args:
-        circles: A list of dictionaries representing player positions and vectors.
-
-    Returns:
-        A pandas DataFrame with columns:
-            x_clean: Cleaned x-position (accounting for field boundaries).
-            y_clean: Cleaned y-position (accounting for field boundaries).
-            v_x: x-component of the velocity vector.
-            v_y: y-component of the velocity vector.
-            defense: 0 if offensive player, 1 if defensive player.
-    """
-    data = []
-    for circle in circles:
-        # Adjust positions based on team color and field boundaries
-        x_pos = circle["pos"][0]
-        y_pos = circle["pos"][1]
-        # if circle["color"] == RED:
-        #   x_pos = max(x_pos, 50)  # Limit offense to their side of the field
-        # else:
-        #   x_pos = min(x_pos, WIDTH - 50)  # Limit defense to their side of the field
-
-        data.append({
-            "frameId": 1,
-            "x_clean": (x_pos - 50) / 9,
-            "y_clean": (y_pos - 50) / 9,# min(max(y_pos, 50), HEIGHT - 50),  # Clamp y-position to field bounds
-            "v_x": circle["vector"][0] / 9,
-            "v_y": circle["vector"][1] / 9,
-            "defense": 1 if circle["color"] == BLUE else 0  # 1 for defense, 0 for offense
-        })
-
-    return pd.DataFrame(data)
 
 def draw_play_dropdown():
     font = pygame.font.Font(None, 24)
@@ -117,6 +90,16 @@ def draw_play_dropdown():
         screen.blit(text_surface, text_rect)
 
         y_offset += 30
+    y_offset += 75
+    for i, formation in enumerate(["GB v. DET", "CIN v. CAR"]):
+        rect = pygame.Rect(1180, y_offset, 100, 25)
+        pygame.draw.rect(screen, GRAY if current_formation["Offense"] != formation else YELLOW, rect)
+
+        text_surface = font.render(formation, True, BLACK)
+        text_rect = text_surface.get_rect(center=rect.center)  # Center the text rect
+        screen.blit(text_surface, text_rect)
+
+        y_offset += 30
 
 def handle_dropdown_click(pos):
     y_offset = 70
@@ -131,32 +114,85 @@ def handle_dropdown_click(pos):
             set_formation("Offense", formation)
             break
         y_offset += 30
+    y_offset += 75
+    for i, formation in enumerate(["GB v. DET", "CIN v. CAR"]):
+        los, direction = None, None
+        if (y_offset <= pos[1] <= y_offset + 25):
+            if i == 0: game = json.load(open('pack.json'))
+            else: game = json.load(open('cincy.json'))
+            for row in game:
+                print(row)
+                print("\n")
+                if row['club'] == 'football':
+                    los = row['x']
+                    direction = row['playDirection']
+                    break
+            circles = []
+            for idx, row in enumerate(game):
+                if row['club'] == 'football':
+                    continue
+                circles.append({
+                    "pos": [round(row['x'] * 9 + 50, 2), round(row['y'] * 9 + 50, 2)],
+                    "label": row['displayName'].split(' ')[-1],
+                    "color": (0, 0, 255) if (direction == 'left' and row['x'] < los) or (direction == 'right' and row['x'] > los) else (255, 0, 0),
+                    "dragging": False,
+                    "vector": [(row['s'] * 9) * math.cos(float(row['dir']) - 90), (row['s'] * 9) * math.sin(float(row['dir']) - 90)],
+                })
+            return circles
+        # use_preset_positions(circles, los * 9 + 50)
+        y_offset += 30
 
-def predict_coverage(circles):
-  """
-  Prepares the positions data as a tensor and predicts zone/man coverage.
+# def create_player_dataframe(circles):
+#   """
+#   Creates a pandas DataFrame from the list of player positions and vectors.
+#   Args:
+#       circles: A list of dictionaries representing player positions and vectors.
+#   Returns:
+#       A pandas DataFrame with columns:
+#           x_clean: Cleaned x-position (accounting for field boundaries).
+#           y_clean: Cleaned y-position (accounting for field boundaries).
+#           v_x: x-component of the velocity vector.
+#           v_y: y-component of the velocity vector.
+#           defense: 0 if offensive player, 1 if defensive player.
+#   """
+#   data = []
+#   for circle in circles:
+#     # Adjust positions based on team color and field boundaries
+#     x_pos = circle["pos"][0]
+#     y_pos = circle["pos"][1]
+#     if circle["color"] == RED:
+#       x_pos = max(x_pos, 50)  # Limit offense to their side of the field
+#     else:
+#       x_pos = min(x_pos, WIDTH - 50)  # Limit defense to their side of the field
+#     data.append({
+#         "frameId": 1,
+#         "x_clean": x_pos,
+#         "y_clean": min(max(y_pos, 50), HEIGHT - 50),  # Clamp y-position to field bounds
+#         "v_x": circle["vector"][0],
+#         "v_y": circle["vector"][1],
+#         "defense": 1 if circle["color"] == BLUE else 0  # 1 for defense, 0 for offense
+#     })
+#   return pd.DataFrame(data)
+# def predict_coverage(circles):
+#   """
+#   Prepares the positions data as a tensor and predicts zone/man coverage.
+#   Args:
+#       positions: A representation of the current player positions.
+#   Returns:
+#       zone_prob: Probability of zone coverage.
+#       man_prob: Probability of man coverage.
+#   """
+#   # Prepare positions data as a tensor (replace with your specific logic)
+#   positions = create_player_dataframe(circles)
+#   frame_tensor = prepare_tensor(positions)
+#   frame_tensor = frame_tensor.to(DEVICE)  # Move to device if necessary
+#   with torch.no_grad():
+#       outputs = model(frame_tensor)  # Shape: [num_frames, num_classes]
+#       probabilities = torch.softmax(outputs, dim=1).cpu().numpy()
+#       zone_prob = probabilities[0][0]
+#       man_prob = probabilities[0][1]
+#   return zone_prob, man_prob
 
-  Args:
-      positions: A representation of the current player positions.
-
-  Returns:
-      zone_prob: Probability of zone coverage.
-      man_prob: Probability of man coverage.
-  """
-  # Prepare positions data as a tensor (replace with your specific logic)
-  positions = create_player_dataframe(circles)
-  frame_tensor = prepare_tensor(positions)
-
-  frame_tensor = frame_tensor.to(DEVICE)  # Move to device if necessary
-
-  with torch.no_grad():
-      outputs = model(frame_tensor)  # Shape: [num_frames, num_classes]
-      probabilities = torch.softmax(outputs, dim=1).cpu().numpy()
-
-      zone_prob = probabilities[0][0]
-      man_prob = probabilities[0][1]
-
-  return zone_prob, man_prob
 
 # Draw American football field
 def draw_rect_alpha(surface, color, rect):
@@ -304,6 +340,7 @@ def draw_input_box(input_box_active, input_text):
 #         text_surface = font.render(f"{team}: {current_formation[team]}", True, BLACK)
 #         screen.blit(text_surface, (10, y_offset))
 #         y_offset += 30
+'''
 def handle_api_request(input_text, input_box_active):
     gameId, playId = input_text.split('_')
     endpoint = f"{API_URL}/tracking/?gameId={gameId}&playId={playId}"
@@ -336,6 +373,159 @@ def handle_api_request(input_text, input_box_active):
             "vector": [(row.s * 9) * math.cos(float(row.dir) - 90), (row.s * 9) * math.sin(float(row.dir) - 90)],
         })
     use_preset_positions(circles, los * 9 + 50)
+'''
+'''
+async def handle_api_request(input_text, input_box_active):
+    gameId, playId = input_text.split('_')
+    handler = pygbag.support.cross.aio.fetch.RequestHandler()
+    endpoint = f"{API_URL}/tracking/?gameId={gameId}&playId={playId}"
+    try:
+        data = await handler.get(endpoint)
+    except Exception as e:
+        print(f"Error sending data to API: {e}")
+        return None  # Return None in case of an error
+
+    # endpoint = f"{API_URL}/tracking/?gameId={gameId}&playId={playId}"
+    # try:
+    #     response = requests.get(endpoint)
+    #     response.raise_for_status()  # Raise an exception for bad status codes
+    #     data = response.json()  # Extract API response as JSON
+    # except requests.exceptions.RequestException as e:
+    #     print(f"Error sending data to API: {e}")
+    #     return  # Exit the function in case of an error
+
+    input_text = ''  # Clear the input box after sending
+    input_box_active = False  # Deactivate the input box
+
+    los, direction = None, None
+    circles = []
+
+    # Process the data to find the line of scrimmage (los) and direction
+    for row in data['data']:
+        if row['club'] == 'football':
+            los = row['x']
+            direction = row['playDirection']
+            break
+
+    # Process all rows to create the circles data
+    for row in data['data']:
+        if row['club'] == 'football':
+            continue
+        x_pos = round(row['x'] * 9 + 50, 2)
+        y_pos = round(row['y'] * 9 + 50, 2)
+        is_behind_los = (direction == 'left' and row['x'] < los) or (direction == 'right' and row['x'] > los)
+        color = (0, 0, 255) if is_behind_los else (255, 0, 0)
+        vector_x = (row['s'] * 9) * math.cos(math.radians(float(row['dir']) - 90))
+        vector_y = (row['s'] * 9) * math.sin(math.radians(float(row['dir']) - 90))
+
+        circles.append({
+            "pos": [x_pos, y_pos],
+            "label": row['displayName'].split(' ')[-1],
+            "color": color,
+            "dragging": False,
+            "vector": [vector_x, vector_y],
+        })
+
+    # Use the preset positions with the calculated circles
+    use_preset_positions(circles, los * 9 + 50)
+'''
+
+class AsyncSocket:
+    def __init__(self, url, timeout=5):
+        self.host, self.port = url.rsplit(":", 1)
+        self.port = int(self.port)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.setblocking(False)  # Non-blocking socket
+        self.timeout = timeout
+        self.rxq = []  # Receive queue
+        self.txq = []  # Transmit queue
+        self.alive = True
+
+    async def open(self):
+        """Open the socket connection asynchronously."""
+        start_time = asyncio.get_event_loop().time()
+        while self.alive:
+            try:
+                # Connect the socket asynchronously, using select for non-blocking behavior
+                if self.socket.fileno() == -1:  # Check if the socket is closed
+                    self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.socket.setblocking(False)
+
+                # Wait for the socket to be ready to connect
+                ready_to_write, _, _ = select.select([], [self.socket], [], 0)
+                if ready_to_write:
+                    self.socket.connect((self.host, self.port))  # Now you can connect
+                    return self.socket  # Return the socket after successfully connecting
+
+            except BlockingIOError:
+                await asyncio.sleep(0)  # Yield control to avoid busy waiting
+            except OSError as e:
+                print(f"Socket connection error: {e}")
+                if asyncio.get_event_loop().time() - start_time > self.timeout:
+                    print("Connection attempt timed out.")
+                    break  # Exit after timeout
+                await asyncio.sleep(1)  # Retry after 1 second
+
+    async def receive_data(self):
+        """Continuously receive data asynchronously."""
+        while self.alive:
+            try:
+                # Use select to wait until the socket is ready to read
+                ready_to_read, _, _ = select.select([self.socket], [], [], 0)
+                if ready_to_read:
+                    data = self.socket.recv(1024)  # Receive up to 1024 bytes of data
+                    if data:
+                        self.rxq.append(data.decode("utf-8"))
+                    else:
+                        print("Socket connection closed by server.")
+                        self.alive = False
+                else:
+                    await asyncio.sleep(0.1)  # Yield control to avoid blocking
+            except Exception as e:
+                print(f"Error receiving data: {e}")
+                self.alive = False
+
+    async def send_data(self, data):
+        """Send data asynchronously to the socket."""
+        try:
+            # Ensure the socket is writable before sending data
+            ready_to_write, _, _ = select.select([], [self.socket], [], 0)
+            if ready_to_write:
+                self.socket.send(data.encode("utf-8"))
+            else:
+                print("Socket not ready for sending data.")
+        except Exception as e:
+            print(f"Error sending data: {e}")
+            self.alive = False
+
+    async def close(self):
+        """Gracefully close the socket."""
+        self.alive = False
+        if self.socket:
+            self.socket.close()
+            print("Socket closed.")
+
+
+# async def websocket_client(circles):
+#     """Connects to the WebSocket server and interacts with it using aiohttp."""
+#     uri = f"ws://{API_URL}/ws/predict"
+    
+#     async with aiohttp.ClientSession() as session:
+#         try:
+#             async with session.ws_connect(uri) as ws:
+#                 print("Connected to WebSocket server.")
+
+#                 # Send data
+#                 await ws.send_str(json.dumps(circles))
+
+#                 # Receive response
+#                 response = await ws.receive()
+#                 # print("Received:", response.data if response.type == aiohttp.WSMsgType.TEXT else "Non-text response")
+                
+#                 return json.loads(response.data) if response.type == aiohttp.WSMsgType.TEXT else None
+
+#         except Exception as e:
+#             print(f"WebSocket Error: {e}")
 
 def set_formation(team, formation):
     global current_formation, circles, los_x
@@ -366,6 +556,7 @@ def update_positions(elapsed_time):
         circle["vector"][0] *= (1 - elapsed_time)
         circle["vector"][1] *= (1 - elapsed_time)
 
+
 async def main():
 
     # Variables
@@ -383,8 +574,11 @@ async def main():
 
     circles = get_red_offense(los_x) + get_blue_defense(los_x)
 
-    model.load_state_dict(torch.load('./best_model_week3.pth', weights_only=True, map_location=DEVICE))
-    model.eval()
+    # Initialize socket
+    # URL = "localhost:8000"
+    # async_socket = AsyncSocket(URL)
+
+    # await async_socket.open()
 
     # Main loop
     running = True
@@ -409,7 +603,7 @@ async def main():
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # print(circles)
                 if 1180 <= event.pos[0] <= WIDTH and 70 <= event.pos[1] <= HEIGHT:
-                    handle_dropdown_click(event.pos)
+                    circles = handle_dropdown_click(event.pos)
                 # Toggle mode button
                 elif WIDTH // 2 - 50 <= event.pos[0] <= WIDTH // 2 + 50 and 10 <= event.pos[1] <= 50:
                     mode = "Vector" if mode == "Position" else "Position"
@@ -435,8 +629,10 @@ async def main():
                     input_box_active = True
                 else:
                     input_box_active = False
+                '''
                 if button_rect.collidepoint(event.pos):
                     handle_api_request(input_text, input_box_active)
+                '''
             elif event.type == pygame.MOUSEBUTTONUP:
                 for circle in circles:
                     circle["dragging"] = False
@@ -463,9 +659,13 @@ async def main():
                     update_los(los_offset)
             if event.type == pygame.KEYDOWN:
                 if input_box_active:
+
                     if event.key == pygame.K_RETURN:
                         # Send data to API
+                        pass
+                        '''
                         handle_api_request(input_text, input_box_active)
+                        '''
                     elif event.key == pygame.K_BACKSPACE:
                         input_text = input_text[:-1]
                     else:
@@ -495,6 +695,20 @@ async def main():
         draw_play_dropdown()
         draw_input_box(input_box_active, input_text)
 
+
+        # Prepare and send circles data as JSON
+        circles_json = json.dumps(circles)
+        # Send circles data to WebSocket and await the response
+        # await async_socket.send_data(circles_json)
+
+        # response = await async_socket.receive_data()
+        # try:
+        #     data = json.loads(response)
+        #     zone = data.get("zone_prob", 0.0)
+        #     man = data.get("man_prob", 0.0)
+        # except json.JSONDecodeError:
+        #     zone = 0.0
+        #     man = 0.0
         # Get coverage prediction
         zone, man = predict_coverage(circles)
         font = pygame.font.Font(None, 24)
@@ -522,7 +736,7 @@ async def main():
         clock.tick(60)
         await asyncio.sleep(0) 
 
-    pygame.quit()
-    sys.exit()
+    # pygame.quit()
+    # sys.exit()
 
 asyncio.run(main())
