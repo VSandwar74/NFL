@@ -5,12 +5,15 @@ import sys
 import math
 from pygame.locals import *
 from formations import get_presets
-import pygbag
 
-import pygbag.aio as asyncio
+# import pygbag
+# import pygbag.aio as asyncio
 # import asyncio
 import aiohttp
 
+import torch
+import pandas as pd
+from model import model, prepare_tensor
 import json
 import random
 import base64
@@ -35,6 +38,11 @@ pygame.display.set_caption("American Football Formation")
 API_URL = "0.0.0.0:8000"
 # API_URL = "https://nfl-f1ma.onrender.com"
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+model.load_state_dict(torch.load('./best_model_week3.pth', weights_only=True, map_location=DEVICE))
+model.to(DEVICE)
+model.eval()
 
 # Colors
 GREEN = (34, 139, 34)
@@ -142,56 +150,56 @@ def handle_dropdown_click(pos):
         # use_preset_positions(circles, los * 9 + 50)
         y_offset += 30
 
-# def create_player_dataframe(circles):
-#   """
-#   Creates a pandas DataFrame from the list of player positions and vectors.
-#   Args:
-#       circles: A list of dictionaries representing player positions and vectors.
-#   Returns:
-#       A pandas DataFrame with columns:
-#           x_clean: Cleaned x-position (accounting for field boundaries).
-#           y_clean: Cleaned y-position (accounting for field boundaries).
-#           v_x: x-component of the velocity vector.
-#           v_y: y-component of the velocity vector.
-#           defense: 0 if offensive player, 1 if defensive player.
-#   """
-#   data = []
-#   for circle in circles:
-#     # Adjust positions based on team color and field boundaries
-#     x_pos = circle["pos"][0]
-#     y_pos = circle["pos"][1]
-#     if circle["color"] == RED:
-#       x_pos = max(x_pos, 50)  # Limit offense to their side of the field
-#     else:
-#       x_pos = min(x_pos, WIDTH - 50)  # Limit defense to their side of the field
-#     data.append({
-#         "frameId": 1,
-#         "x_clean": x_pos,
-#         "y_clean": min(max(y_pos, 50), HEIGHT - 50),  # Clamp y-position to field bounds
-#         "v_x": circle["vector"][0],
-#         "v_y": circle["vector"][1],
-#         "defense": 1 if circle["color"] == BLUE else 0  # 1 for defense, 0 for offense
-#     })
-#   return pd.DataFrame(data)
-# def predict_coverage(circles):
-#   """
-#   Prepares the positions data as a tensor and predicts zone/man coverage.
-#   Args:
-#       positions: A representation of the current player positions.
-#   Returns:
-#       zone_prob: Probability of zone coverage.
-#       man_prob: Probability of man coverage.
-#   """
-#   # Prepare positions data as a tensor (replace with your specific logic)
-#   positions = create_player_dataframe(circles)
-#   frame_tensor = prepare_tensor(positions)
-#   frame_tensor = frame_tensor.to(DEVICE)  # Move to device if necessary
-#   with torch.no_grad():
-#       outputs = model(frame_tensor)  # Shape: [num_frames, num_classes]
-#       probabilities = torch.softmax(outputs, dim=1).cpu().numpy()
-#       zone_prob = probabilities[0][0]
-#       man_prob = probabilities[0][1]
-#   return zone_prob, man_prob
+def create_player_dataframe(circles):
+  """
+  Creates a pandas DataFrame from the list of player positions and vectors.
+  Args:
+      circles: A list of dictionaries representing player positions and vectors.
+  Returns:
+      A pandas DataFrame with columns:
+          x_clean: Cleaned x-position (accounting for field boundaries).
+          y_clean: Cleaned y-position (accounting for field boundaries).
+          v_x: x-component of the velocity vector.
+          v_y: y-component of the velocity vector.
+          defense: 0 if offensive player, 1 if defensive player.
+  """
+  data = []
+  for circle in circles:
+    # Adjust positions based on team color and field boundaries
+    x_pos = circle["pos"][0]
+    y_pos = circle["pos"][1]
+    if circle["color"] == RED:
+      x_pos = max(x_pos, 50)  # Limit offense to their side of the field
+    else:
+      x_pos = min(x_pos, WIDTH - 50)  # Limit defense to their side of the field
+    data.append({
+        "frameId": 1,
+        "x_clean": x_pos,
+        "y_clean": min(max(y_pos, 50), HEIGHT - 50),  # Clamp y-position to field bounds
+        "v_x": circle["vector"][0],
+        "v_y": circle["vector"][1],
+        "defense": 1 if circle["color"] == BLUE else 0  # 1 for defense, 0 for offense
+    })
+  return pd.DataFrame(data)
+def predict_coverage(circles):
+  """
+  Prepares the positions data as a tensor and predicts zone/man coverage.
+  Args:
+      positions: A representation of the current player positions.
+  Returns:
+      zone_prob: Probability of zone coverage.
+      man_prob: Probability of man coverage.
+  """
+  # Prepare positions data as a tensor (replace with your specific logic)
+  positions = create_player_dataframe(circles)
+  frame_tensor = prepare_tensor(positions)
+  frame_tensor = frame_tensor.to(DEVICE)  # Move to device if necessary
+  with torch.no_grad():
+      outputs = model(frame_tensor)  # Shape: [num_frames, num_classes]
+      probabilities = torch.softmax(outputs, dim=1).cpu().numpy()
+      zone_prob = probabilities[0][0]
+      man_prob = probabilities[0][1]
+  return zone_prob, man_prob
 
 
 # Draw American football field
@@ -430,82 +438,6 @@ async def handle_api_request(input_text, input_box_active):
     use_preset_positions(circles, los * 9 + 50)
 '''
 
-class AsyncSocket:
-    def __init__(self, url, timeout=5):
-        self.host, self.port = url.rsplit(":", 1)
-        self.port = int(self.port)
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.setblocking(False)  # Non-blocking socket
-        self.timeout = timeout
-        self.rxq = []  # Receive queue
-        self.txq = []  # Transmit queue
-        self.alive = True
-
-    async def open(self):
-        """Open the socket connection asynchronously."""
-        start_time = asyncio.get_event_loop().time()
-        while self.alive:
-            try:
-                # Connect the socket asynchronously, using select for non-blocking behavior
-                if self.socket.fileno() == -1:  # Check if the socket is closed
-                    self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    self.socket.setblocking(False)
-
-                # Wait for the socket to be ready to connect
-                ready_to_write, _, _ = select.select([], [self.socket], [], 0)
-                if ready_to_write:
-                    self.socket.connect((self.host, self.port))  # Now you can connect
-                    return self.socket  # Return the socket after successfully connecting
-
-            except BlockingIOError:
-                await asyncio.sleep(0)  # Yield control to avoid busy waiting
-            except OSError as e:
-                print(f"Socket connection error: {e}")
-                if asyncio.get_event_loop().time() - start_time > self.timeout:
-                    print("Connection attempt timed out.")
-                    break  # Exit after timeout
-                await asyncio.sleep(1)  # Retry after 1 second
-
-    async def receive_data(self):
-        """Continuously receive data asynchronously."""
-        while self.alive:
-            try:
-                # Use select to wait until the socket is ready to read
-                ready_to_read, _, _ = select.select([self.socket], [], [], 0)
-                if ready_to_read:
-                    data = self.socket.recv(1024)  # Receive up to 1024 bytes of data
-                    if data:
-                        self.rxq.append(data.decode("utf-8"))
-                    else:
-                        print("Socket connection closed by server.")
-                        self.alive = False
-                else:
-                    await asyncio.sleep(0.1)  # Yield control to avoid blocking
-            except Exception as e:
-                print(f"Error receiving data: {e}")
-                self.alive = False
-
-    async def send_data(self, data):
-        """Send data asynchronously to the socket."""
-        try:
-            # Ensure the socket is writable before sending data
-            ready_to_write, _, _ = select.select([], [self.socket], [], 0)
-            if ready_to_write:
-                self.socket.send(data.encode("utf-8"))
-            else:
-                print("Socket not ready for sending data.")
-        except Exception as e:
-            print(f"Error sending data: {e}")
-            self.alive = False
-
-    async def close(self):
-        """Gracefully close the socket."""
-        self.alive = False
-        if self.socket:
-            self.socket.close()
-            print("Socket closed.")
-
-
 # async def websocket_client(circles):
 #     """Connects to the WebSocket server and interacts with it using aiohttp."""
 #     uri = f"ws://{API_URL}/ws/predict"
@@ -557,7 +489,7 @@ def update_positions(elapsed_time):
         circle["vector"][1] *= (1 - elapsed_time)
 
 
-async def main():
+def main():
 
     # Variables
     active_position = "Cursor"
@@ -697,7 +629,7 @@ async def main():
 
 
         # Prepare and send circles data as JSON
-        circles_json = json.dumps(circles)
+        # circles_json = json.dumps(circles)
         # Send circles data to WebSocket and await the response
         # await async_socket.send_data(circles_json)
 
@@ -710,6 +642,7 @@ async def main():
         #     zone = 0.0
         #     man = 0.0
         # Get coverage prediction
+
         zone, man = predict_coverage(circles)
         font = pygame.font.Font(None, 24)
         text = font.render(f"Zone: {zone:.2f}, Man: {man:.2f}", True, BLACK)
@@ -734,9 +667,10 @@ async def main():
 
         pygame.display.flip()
         clock.tick(60)
-        await asyncio.sleep(0) 
+        # await asyncio.sleep(0) 
 
-    # pygame.quit()
-    # sys.exit()
+    pygame.quit()
+    sys.exit()
 
-asyncio.run(main())
+main()
+# asyncio.run(main())
