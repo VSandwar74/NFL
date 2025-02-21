@@ -109,18 +109,18 @@ def draw_play_dropdown():
 
         y_offset += 30
 
-def handle_dropdown_click(pos):
+def handle_dropdown_click(pos, los_x, current_formation):
     y_offset = 70
     for i, formation in enumerate(["3-4", "4-3", "Nickel"]):
         if y_offset <= pos[1] <= y_offset + 25:
-            set_formation("Defense", formation)
-            break
+            set_formation("Defense", current_formation, formation, los_x)
+            return circles, los_x
         y_offset += 30
     y_offset += 75
     for i, formation in enumerate(["I-Form", "Singleback", "Shotgun"]):
         if y_offset <= pos[1] <= y_offset + 25:
-            set_formation("Offense", formation)
-            break
+            set_formation("Offense", current_formation, formation, los_x)
+            return circles, los_x
         y_offset += 30
     y_offset += 75
     for i, formation in enumerate(["GB v. DET", "CIN v. CAR"]):
@@ -128,14 +128,12 @@ def handle_dropdown_click(pos):
         if (y_offset <= pos[1] <= y_offset + 25):
             if i == 0: game = json.load(open('pack.json'))
             else: game = json.load(open('cincy.json'))
+            circles = []
             for row in game:
-                print(row)
-                print("\n")
                 if row['club'] == 'football':
                     los = row['x']
                     direction = row['playDirection']
                     break
-            circles = []
             for idx, row in enumerate(game):
                 if row['club'] == 'football':
                     continue
@@ -146,7 +144,8 @@ def handle_dropdown_click(pos):
                     "dragging": False,
                     "vector": [(row['s'] * 9) * math.cos(float(row['dir']) - 90), (row['s'] * 9) * math.sin(float(row['dir']) - 90)],
                 })
-            return circles
+            # get_position(circles, los * 9 + 50)
+            return circles, los * 9 + 50
         # use_preset_positions(circles, los * 9 + 50)
         y_offset += 30
 
@@ -292,7 +291,7 @@ def draw_toggle(mode):
     text = font.render(mode, True, BLUE)
     screen.blit(text, (WIDTH // 2 - 30, 17))
 
-def update_los(los_x_offset):
+def update_los(los_x_offset, circles):
     for circle in circles:
         circle["pos"][0] += los_x_offset
 
@@ -459,11 +458,23 @@ async def handle_api_request(input_text, input_box_active):
 #         except Exception as e:
 #             print(f"WebSocket Error: {e}")
 
-def set_formation(team, formation):
-    global current_formation, circles, los_x
+def set_formation(team, current_formation, formation, los_x):
     current_formation[team] = formation
-    circles = get_red_offense() + get_blue_defense()
-    # positions = get_presets(HEIGHT, WIDTH)[team][formation]
+    
+    # Get the new positions based on the formation
+    # positions = get_presets(HEIGHT, WIDTH, los_x)[team][formation]
+    # Update circles to use the new formation
+    if team == "Offense":
+        circles = get_red_offense(los_x) + get_blue_defense(los_x)
+    else:
+        circles = get_red_offense(los_x) + get_blue_defense(los_x)
+    return circles
+
+def get_position(new_circles, new_los):
+    global circles, los_x
+    print(new_circles[-1])
+    circles = new_circles
+    los_x = new_los
 
 def use_preset_positions(preset, new_los):
     global current_formation, circles, los_x
@@ -535,7 +546,7 @@ def main():
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # print(circles)
                 if 1180 <= event.pos[0] <= WIDTH and 70 <= event.pos[1] <= HEIGHT:
-                    circles = handle_dropdown_click(event.pos)
+                    circles, los_x = handle_dropdown_click(event.pos, los_x, current_formation)
                 # Toggle mode button
                 elif WIDTH // 2 - 50 <= event.pos[0] <= WIDTH // 2 + 50 and 10 <= event.pos[1] <= 50:
                     mode = "Vector" if mode == "Position" else "Position"
@@ -588,7 +599,7 @@ def main():
                     los_offset = event.pos[0] - los_start_x
                     los_x += los_offset
                     los_start_x = event.pos[0]
-                    update_los(los_offset)
+                    update_los(los_offset, circles)
             if event.type == pygame.KEYDOWN:
                 if input_box_active:
 
@@ -606,17 +617,17 @@ def main():
                     # if event.key == pygame.K_SPACE:
                     #     paused = not paused
                     if event.key == pygame.K_1:  
-                        set_formation("Offense", "I-Form")
+                        circles = set_formation("Offense", current_formation, "I-Form", los_x)
                     elif event.key == pygame.K_2:  
-                        set_formation("Offense", "Singleback")
+                        circles = set_formation("Offense", current_formation, "Singleback", los_x)
                     elif event.key == pygame.K_3:  
-                        set_formation("Offense", "Shotgun")
+                        circles = set_formation("Offense", current_formation, "Shotgun", los_x)
                     elif event.key == pygame.K_8:
-                        set_formation("Defense", "4-3")
+                        circles = set_formation("Defense", current_formation, "4-3", los_x)
                     elif event.key == pygame.K_9:
-                        set_formation("Defense", "3-4")
+                        circles = set_formation("Defense", current_formation, "3-4", los_x)
                     elif event.key == pygame.K_0:
-                        set_formation("Defense", "Nickel")
+                        circles = set_formation("Defense", current_formation, "Nickel", los_x)
 
         if noise < 1:
             dots = get_noise(0.005)
