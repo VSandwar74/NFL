@@ -131,16 +131,16 @@ def draw_play_dropdown():
         y_offset += 30
     
 
-def handle_dropdown_click(pos):
+def handle_dropdown_click(pos, los_x):
     y_offset = 70
     for i, formation in enumerate(["3-4", "4-3", "Nickel"]):
         if y_offset <= pos[1] <= y_offset + 25:
-            return set_formation("Defense", formation)
+            return set_formation("Defense", formation, los_x), los_x
         y_offset += 30
     y_offset += 75
     for i, formation in enumerate(["I-Form", "Singleback", "Shotgun"]):
         if y_offset <= pos[1] <= y_offset + 25:
-            return set_formation("Offense", formation)
+            return set_formation("Offense", formation, los_x), los_x
         y_offset += 30
     y_offset += 75
     for i, formation in enumerate(["CAR v. CIN", "GB v. DET"]):
@@ -383,7 +383,7 @@ def set_formation(team, formation, los_x):
     global current_formation
     current_formation[team] = formation
     circles = get_red_offense(los_x) + get_blue_defense(los_x)
-    return circles, los_x
+    return circles
     # positions = get_presets(HEIGHT, WIDTH)[team][formation]
 
 def use_preset_positions(preset, new_los):
@@ -394,7 +394,7 @@ def use_preset_positions(preset, new_los):
     circles = preset
 
 # Update player positions
-def update_positions(elapsed_time):
+def update_positions(elapsed_time, circles):
     for circle in circles:
         vector = circle["vector"]
         if vector[0] == 0 and vector[1] == 0:
@@ -440,7 +440,7 @@ def main():
         if playing and start_time:
             elapsed_time = current_time - start_time
             start_time = current_time
-            update_positions(elapsed_time)
+            update_positions(elapsed_time, circles)
             # Stop animation after 1 second
             if elapsed_time >= 1:
                 playing = False
@@ -452,7 +452,7 @@ def main():
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # print(circles)
                 if 1180 <= event.pos[0] <= WIDTH and 70 <= event.pos[1] <= HEIGHT:
-                    circles, los_x = handle_dropdown_click(event.pos)
+                    circles, los_x = handle_dropdown_click(event.pos, los_x)
                 # Toggle mode button
                 elif WIDTH // 2 - 50 <= event.pos[0] <= WIDTH // 2 + 50 and 10 <= event.pos[1] <= 50:
                     mode = "Vector" if mode == "Position" else "Position"
@@ -541,7 +541,7 @@ def main():
 
         # Get coverage prediction
         zone, man = predict_coverage(circles)
-        font = pygame.font.Font(None, 24)
+        font = pygame.font.Font(None, 32)
         text = font.render(f"Zone: {zone:.2f}, Man: {man:.2f}", True, BLACK)
         screen.blit(text, (WIDTH // 2 - 75, HEIGHT - 30))
 
