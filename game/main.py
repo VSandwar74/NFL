@@ -542,8 +542,8 @@ def main():
         # Get coverage prediction
         zone, man = predict_coverage(circles)
         font = pygame.font.Font(None, 32)
-        text = font.render(f"Zone: {zone:.2f}, Man: {man:.2f}", True, BLACK)
-        screen.blit(text, (WIDTH // 2 - 75, HEIGHT - 30))
+        text = font.render(f"Zone: {100 * round(zone, 2)}%, Man: {100 * round(man, 2)}%", True, BLACK)
+        screen.blit(text, (WIDTH // 2 - 225, HEIGHT - 30))
 
         cursor_pos = pygame.mouse.get_pos()
         font = pygame.font.Font(None, 24)
