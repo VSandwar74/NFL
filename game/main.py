@@ -1,4 +1,5 @@
 import json
+from typing import List
 import numpy as np
 import pygame
 import sys
@@ -289,7 +290,7 @@ def draw_toggle(mode):
     text = font.render(mode, True, BLUE)
     screen.blit(text, (WIDTH // 2 - 30, 17))
 
-def update_los(los_x_offset):
+def update_los(circles: List[dict], los_x_offset):
     for circle in circles:
         circle["pos"][0] += los_x_offset
 
@@ -502,7 +503,8 @@ def main():
                     los_offset = event.pos[0] - los_start_x
                     los_x += los_offset
                     los_start_x = event.pos[0]
-                    update_los(los_offset)
+                    update_los(circles, los_offset)
+                    # los_x = 
             if event.type == pygame.KEYDOWN:
                 if input_box_active:
                     if event.key == pygame.K_RETURN:
