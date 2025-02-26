@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import pygame
 import sys
@@ -117,19 +118,59 @@ def draw_play_dropdown():
         screen.blit(text_surface, text_rect)
 
         y_offset += 30
+    y_offset += 75
+    for i, formation in enumerate(["CAR v. CIN", "GB v. DET"]):
+        rect = pygame.Rect(1180, y_offset, 100, 25)
+        pygame.draw.rect(screen, GRAY if current_formation["Offense"] != formation else YELLOW, rect)
+
+        text_surface = font.render(formation, True, BLACK)
+        text_rect = text_surface.get_rect(center=rect.center)  # Center the text rect
+        screen.blit(text_surface, text_rect)
+
+        y_offset += 30
+    
 
 def handle_dropdown_click(pos):
     y_offset = 70
     for i, formation in enumerate(["3-4", "4-3", "Nickel"]):
         if y_offset <= pos[1] <= y_offset + 25:
-            set_formation("Defense", formation)
-            break
+            return set_formation("Defense", formation)
         y_offset += 30
     y_offset += 75
     for i, formation in enumerate(["I-Form", "Singleback", "Shotgun"]):
         if y_offset <= pos[1] <= y_offset + 25:
-            set_formation("Offense", formation)
-            break
+            return set_formation("Offense", formation)
+        y_offset += 30
+    y_offset += 75
+    for i, formation in enumerate(["CAR v. CIN", "GB v. DET"]):
+        if y_offset <= pos[1] <= y_offset + 25:
+            los, direction = None, None
+            if formation == "CAR v. CIN": 
+                with open('cincy.json', 'r') as f:
+                    data = json.load(f)
+            elif formation == "GB v. DET":
+                with open('pack.json', 'r') as f:
+                    data = json.load(f)
+            df = pd.DataFrame(data)
+            print(df)
+            for idx, row in df.iterrows():
+                if row['club'] == 'football':
+                    los = row['x']
+                    direction = row['playDirection']
+                    break
+            circles = []
+            for idx, row in df.iterrows():
+                if row.club == 'football':
+                    continue
+                circles.append({
+                    "pos": [round(row.x * 9 + 50, 2), round(row.y * 9 + 50, 2)],
+                    "label": row.displayName.split(' ')[-1],
+                    "color": (0, 0, 255) if (direction == 'left' and row['x'] < los) or (direction == 'right' and row['x'] > los) else (255, 0, 0),
+                    "dragging": False,
+                    "vector": [(row.s * 9) * math.cos(float(row.dir) - 90), (row.s * 9) * math.sin(float(row.dir) - 90)],
+                })
+            # use_preset_positions(circles, los * 9 + 50)
+            return circles, los * 9 + 50
         y_offset += 30
 
 def predict_coverage(circles):
@@ -337,10 +378,11 @@ def handle_api_request(input_text, input_box_active):
         })
     use_preset_positions(circles, los * 9 + 50)
 
-def set_formation(team, formation):
-    global current_formation, circles, los_x
+def set_formation(team, formation, los_x):
+    global current_formation
     current_formation[team] = formation
-    circles = get_red_offense() + get_blue_defense()
+    circles = get_red_offense(los_x) + get_blue_defense(los_x)
+    return circles, los_x
     # positions = get_presets(HEIGHT, WIDTH)[team][formation]
 
 def use_preset_positions(preset, new_los):
@@ -366,7 +408,7 @@ def update_positions(elapsed_time):
         circle["vector"][0] *= (1 - elapsed_time)
         circle["vector"][1] *= (1 - elapsed_time)
 
-async def main():
+def main():
 
     # Variables
     active_position = "Cursor"
@@ -409,7 +451,7 @@ async def main():
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # print(circles)
                 if 1180 <= event.pos[0] <= WIDTH and 70 <= event.pos[1] <= HEIGHT:
-                    handle_dropdown_click(event.pos)
+                    circles, los_x = handle_dropdown_click(event.pos)
                 # Toggle mode button
                 elif WIDTH // 2 - 50 <= event.pos[0] <= WIDTH // 2 + 50 and 10 <= event.pos[1] <= 50:
                     mode = "Vector" if mode == "Position" else "Position"
@@ -520,9 +562,9 @@ async def main():
 
         pygame.display.flip()
         clock.tick(60)
-        await asyncio.sleep(0) 
+        # await asyncio.sleep(0) 
 
     pygame.quit()
     sys.exit()
 
-asyncio.run(main())
+main()
